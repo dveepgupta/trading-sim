@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TradeSim — Admin Panel</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .account-row { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+    .account-row input { flex:1; }
+    .progress-bar { height:4px; background:var(--border); border-radius:2px; overflow:hidden; margin-top:6px; }
+    .progress-fill { height:100%; background:var(--blue); border-radius:2px; transition:width 0.3s; }
+    .monitor-table td:first-child { font-family:var(--font-mono); color:var(--blue); }
+    .session-timer { font-family:var(--font-mono); font-size:28px; font-weight:700; color:var(--green); }
+  </style>
+</head>
+<body>
+<div class="app-shell">
+  <!-- Topbar -->
+  <header class="topbar">
+    <a href="admin.html" class="topbar-logo">
+      <div class="topbar-logo-icon">📈</div>
+      TradeSim
+    </a>
+    <div class="topbar-divider"></div>
+    <div class="topbar-title">Admin Panel</div>
+    <div id="session-badge" class="session-badge inactive"><span class="dot"></span> Inactive</div>
+    <div class="topbar-user" id="user-info">
+      <div class="topbar-avatar">A</div>
+      <div><div class="topbar-username">Admin</div><div class="topbar-traderid">Administrator</div></div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="logout()">Logout</button>
+  </header>
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="nav-section-label">Session</div>
+    <a href="#session-section"   class="nav-item active" onclick="showSection('session')"><span class="nav-icon">⚡</span> Session Control</a>
+    <a href="#news-section"      class="nav-item"        onclick="showSection('news')"><span class="nav-icon">📰</span> News Events</a>
+    <div class="nav-section-label">Participants</div>
+    <a href="#accounts-section"  class="nav-item"        onclick="showSection('accounts')"><span class="nav-icon">👥</span> Create Accounts</a>
+    <a href="#monitor-section"   class="nav-item"        onclick="showSection('monitor')"><span class="nav-icon">📊</span> Live Monitor</a>
+    <div class="nav-section-label">Data</div>
+    <a href="#leaderboard-section" class="nav-item"      onclick="showSection('leaderboard')"><span class="nav-icon">🏆</span> Leaderboard</a>
+    <a href="#trades-section"    class="nav-item"        onclick="showSection('trades')"><span class="nav-icon">📋</span> All Trades</a>
+    <div class="sidebar-logout">
+      <button class="btn btn-ghost btn-full btn-sm" onclick="logout()">🚪 Logout</button>
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <main class="main-content">
+    <div id="toast-container"></div>
+
+    <!-- ══ SESSION CONTROL ══ -->
+    <section id="session-section">
+      <div class="page-header">
+        <div><h1 class="page-title">Session Control</h1><p class="page-subtitle">Start, pause, or end the trading session</p></div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Session Status</div>
+          <div class="stat-value" id="stat-status" style="font-size:18px">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Active Traders</div>
+          <div class="stat-value" id="stat-traders">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Trades</div>
+          <div class="stat-value" id="stat-trades">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Session Timer</div>
+          <div class="session-timer" id="session-timer">00:00:00</div>
+        </div>
+      </div>
+
+      <div class="card" style="max-width:480px">
+        <div class="card-title">Session Actions</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-success" id="btn-start"  onclick="setSession('active')">▶ Start Session</button>
+          <button class="btn btn-warning" id="btn-pause"  onclick="setSession('paused')">⏸ Pause</button>
+          <button class="btn btn-danger"  id="btn-end"    onclick="confirmEnd()">⏹ End Session</button>
+          <button class="btn btn-ghost"   id="btn-reset"  onclick="confirmReset()">🔄 Full Reset</button>
+        </div>
+        <p class="muted mt-3" style="font-size:12px">
+          <strong>Start</strong> — opens trading for all participants<br>
+          <strong>Pause</strong> — temporarily halts trading<br>
+          <strong>End</strong> — closes the session (final leaderboard shown)<br>
+          <strong>Reset</strong> — clears all orders & prices, resets portfolios
+        </p>
+      </div>
+    </section>
+
+    <!-- ══ NEWS EVENTS ══ -->
+    <section id="news-section" class="hidden">
+      <div class="page-header">
+        <div><h1 class="page-title">News Events</h1><p class="page-subtitle">Inject market-moving news to affect stock prices</p></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div class="card">
+          <div class="card-title">Inject News Event</div>
+          <div class="form-group">
+            <label class="form-label">Security</label>
+            <select class="form-select" id="news-symbol"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Price Impact (%)</label>
+            <input class="form-input" id="news-pct" type="number" placeholder="e.g. +10 or -15" step="0.1">
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Positive = price goes up, Negative = price goes down</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">News Headline</label>
+            <input class="form-input" id="news-headline" type="text" placeholder="e.g. Record quarterly profits announced">
+          </div>
+          <button class="btn btn-warning btn-full" onclick="injectNews()">📰 Publish News Event</button>
+        </div>
+        <div class="card">
+          <div class="card-title">Recent News</div>
+          <div id="news-log" style="max-height:320px;overflow-y:auto">
+            <div class="empty-state"><div class="empty-icon">📰</div><div class="empty-title">No news yet</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ CREATE ACCOUNTS ══ -->
+    <section id="accounts-section" class="hidden">
+      <div class="page-header">
+        <div><h1 class="page-title">Create Participant Accounts</h1><p class="page-subtitle">Set up accounts for all 60 participants</p></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div class="card">
+          <div class="card-title">Bulk Create</div>
+          <div class="form-group">
+            <label class="form-label">Number of Participants</label>
+            <input class="form-input" id="bulk-count" type="number" value="60" min="1" max="60">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Starting Cash (₹) per Participant</label>
+            <input class="form-input" id="bulk-cash" type="number" value="1000000" step="50000">
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px" id="cash-preview">₹10,00,000</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Default Password</label>
+            <input class="form-input" id="bulk-password" type="text" value="Trade@123" placeholder="Same password for all">
+          </div>
+          <button class="btn btn-primary btn-full" onclick="bulkCreate()">👥 Create All Accounts</button>
+          <div class="progress-bar mt-3 hidden" id="create-progress-wrap">
+            <div class="progress-fill" id="create-progress" style="width:0%"></div>
+          </div>
+          <div id="create-status" class="muted mt-2" style="font-size:12px"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Add Single Participant</div>
+          <div class="form-group">
+            <label class="form-label">Trader ID</label>
+            <input class="form-input" id="single-id" type="text" placeholder="e.g. T01">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Name</label>
+            <input class="form-input" id="single-name" type="text" placeholder="Full name">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Starting Cash (₹)</label>
+            <input class="form-input" id="single-cash" type="number" value="1000000" step="50000">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Password</label>
+            <input class="form-input" id="single-pass" type="text" value="Trade@123">
+          </div>
+          <button class="btn btn-primary btn-full" onclick="createSingle()">➕ Create Account</button>
+          <div id="single-status" class="mt-2" style="font-size:12px"></div>
+        </div>
+      </div>
+
+      <div class="card mt-4">
+        <div class="card-header">
+          <div class="card-title" style="margin-bottom:0">Existing Participants</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadParticipants()">🔄 Refresh</button>
+        </div>
+        <div id="participants-grid" class="participants-grid">
+          <div class="loading"><div class="spinner"></div> Loading…</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ LIVE MONITOR ══ -->
+    <section id="monitor-section" class="hidden">
+      <div class="page-header">
+        <div><h1 class="page-title">Live Monitor</h1><p class="page-subtitle">Real-time view of all participant portfolios</p></div>
+        <button class="btn btn-ghost btn-sm" onclick="refreshMonitor()">🔄 Refresh</button>
+      </div>
+      <div class="card">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Trader ID</th>
+                <th>Name</th>
+                <th>Cash</th>
+                <th>Stock Value</th>
+                <th>Total Value</th>
+                <th>P&amp;L</th>
+                <th>P&amp;L %</th>
+              </tr>
+            </thead>
+            <tbody id="monitor-tbody">
+              <tr><td colspan="7" class="text-center muted" style="padding:32px">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ LEADERBOARD ══ -->
+    <section id="leaderboard-section" class="hidden">
+      <div class="page-header">
+        <div><h1 class="page-title">Leaderboard</h1><p class="page-subtitle">Live rankings by total portfolio value</p></div>
+      </div>
+      <div id="lb-list"></div>
+    </section>
+
+    <!-- ══ ALL TRADES ══ -->
+    <section id="trades-section" class="hidden">
+      <div class="page-header">
+        <div><h1 class="page-title">All Trades</h1><p class="page-subtitle">Complete trade log for this session</p></div>
+      </div>
+      <div class="card">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>#</th><th>Time</th><th>Symbol</th><th>Buyer</th><th>Seller</th><th>Price</th><th>Qty</th><th>Value</th><th>Type</th></tr>
+            </thead>
+            <tbody id="trades-tbody">
+              <tr><td colspan="9" class="text-center muted" style="padding:32px">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="js/config.js"></script>
+<script src="js/securities.js"></script>
+<script src="js/engine.js"></script>
+<script>
+// ── Auth guard ──────────────────────────────
+let ADMIN_UID = null;
+auth.onAuthStateChanged(async (user) => {
+  if (!user) { window.location.href = 'index.html'; return; }
+  const snap = await db.doc(`users/${user.uid}`).get();
+  if (!snap.exists || snap.data().role !== 'admin') { window.location.href = 'index.html'; return; }
+  ADMIN_UID = user.uid;
+  initAdmin();
+});
+
+function logout() { auth.signOut().then(() => window.location.href = 'index.html'); }
+
+// ── Section navigation ─────────────────────
+function showSection(id) {
+  document.querySelectorAll('main > section').forEach(s => s.classList.add('hidden'));
+  document.getElementById(id + '-section').classList.remove('hidden');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+}
+
+// ── Init ────────────────────────────────────
+function initAdmin() {
+  populateNewsSymbols();
+  listenSession();
+  loadParticipants();
+  listenTradeCounts();
+
+  document.getElementById('bulk-cash').addEventListener('input', (e) => {
+    const v = parseInt(e.target.value) || 0;
+    document.getElementById('cash-preview').textContent = '₹' + v.toLocaleString('en-IN');
+  });
+}
+
+// ── Session listeners ───────────────────────
+let sessionStartTime = null;
+let timerInterval = null;
+
+function listenSession() {
+  PATHS.session().onSnapshot(snap => {
+    const data = snap.exists ? snap.data() : { status: 'inactive' };
+    updateSessionUI(data);
+  });
+}
+
+function updateSessionUI(data) {
+  const badge  = document.getElementById('session-badge');
+  const status = document.getElementById('stat-status');
+  const s = data.status || 'inactive';
+
+  badge.className = `session-badge ${s}`;
+  badge.innerHTML = `<span class="dot"></span> ${s.charAt(0).toUpperCase() + s.slice(1)}`;
+  status.textContent = s.charAt(0).toUpperCase() + s.slice(1);
+
+  if (s === 'active' && data.startedAt) {
+    sessionStartTime = data.startedAt.toDate ? data.startedAt.toDate() : new Date(data.startedAt);
+    startTimer();
+  } else {
+    stopTimer();
+  }
+}
+
+function startTimer() {
+  clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    if (!sessionStartTime) return;
+    const elapsed = Math.floor((Date.now() - sessionStartTime.getTime()) / 1000);
+    const h = Math.floor(elapsed / 3600);
+    const m = Math.floor((elapsed % 3600) / 60);
+    const s = elapsed % 60;
+    document.getElementById('session-timer').textContent =
+      `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  }, 1000);
+}
+
+function stopTimer() { clearInterval(timerInterval); }
+
+async function setSession(status) {
+  try {
+    const update = { status, updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+    if (status === 'active') {
+      const cur = await PATHS.session().get();
+      if (!cur.exists || cur.data().status !== 'active') {
+        update.startedAt = firebase.firestore.FieldValue.serverTimestamp();
+        // Initialize prices on first start
+        await initializePrices();
+      }
+    }
+    if (status === 'ended') update.endedAt = firebase.firestore.FieldValue.serverTimestamp();
+    await PATHS.session().set(update, { merge: true });
+    showToast('Session ' + status, '', 'success');
+  } catch (e) { showToast('Error', e.message, 'error'); }
+}
+
+function confirmEnd() {
+  if (confirm('End the trading session? Participants will no longer be able to trade.')) setSession('ended');
+}
+
+async function confirmReset() {
+  if (!confirm('⚠️ Full reset: This will clear ALL orders, prices, and reset all portfolios. Are you sure?')) return;
+  if (!confirm('This cannot be undone. Confirm reset?')) return;
+  try {
+    showToast('Resetting…', 'This may take a moment', 'info');
+    await PATHS.session().set({ status: 'inactive', updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    await initializePrices();
+    showToast('Reset complete', 'Prices re-initialized', 'success');
+  } catch (e) { showToast('Error', e.message, 'error'); }
+}
+
+function listenTradeCounts() {
+  PATHS.trades().onSnapshot(snap => {
+    document.getElementById('stat-trades').textContent = snap.size;
+  });
+  PATHS.users().where('role', '==', 'participant').onSnapshot(snap => {
+    document.getElementById('stat-traders').textContent = snap.size;
+  });
+}
+
+// ── News ─────────────────────────────────────
+function populateNewsSymbols() {
+  const sel = document.getElementById('news-symbol');
+  SECURITIES.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.symbol;
+    opt.textContent = `${s.symbol} — ${s.name}`;
+    sel.appendChild(opt);
+  });
+}
+
+async function injectNews() {
+  const symbol    = document.getElementById('news-symbol').value;
+  const pct       = parseFloat(document.getElementById('news-pct').value);
+  const headline  = document.getElementById('news-headline').value.trim();
+
+  if (!headline)      { showToast('Enter a headline', '', 'error'); return; }
+  if (isNaN(pct))     { showToast('Enter a valid price impact %', '', 'error'); return; }
+
+  try {
+    await applyNewsEvent(symbol, pct, headline);
+    showToast('News published!', `${symbol} price changed by ${pct > 0 ? '+' : ''}${pct}%`, 'success');
+    document.getElementById('news-headline').value = '';
+    loadNewsLog();
+  } catch (e) { showToast('Error', e.message, 'error'); }
+}
+
+async function loadNewsLog() {
+  const snap = await PATHS.news().orderBy('timestamp', 'desc').limit(20).get();
+  const log  = document.getElementById('news-log');
+  if (snap.empty) { log.innerHTML = '<div class="empty-state"><div class="empty-icon">📰</div><div class="empty-title">No news yet</div></div>'; return; }
+  log.innerHTML = snap.docs.map(d => {
+    const n = d.data();
+    const sign = n.changePercent >= 0 ? '+' : '';
+    const cls  = n.changePercent >= 0 ? 'price-up' : 'price-down';
+    return `<div class="news-banner" style="margin-bottom:8px">
+      <span>📰</span>
+      <div>
+        <strong>${n.symbol}</strong>: ${n.headline}<br>
+        <span class="${cls}">${sign}${n.changePercent}%</span>
+        <span class="muted" style="font-size:11px;margin-left:8px">${timeSince(n.timestamp)}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── Create accounts ──────────────────────────
+async function bulkCreate() {
+  const count    = parseInt(document.getElementById('bulk-count').value) || 60;
+  const cash     = parseFloat(document.getElementById('bulk-cash').value) || 1000000;
+  const password = document.getElementById('bulk-password').value || 'Trade@123';
+
+  document.getElementById('create-progress-wrap').classList.remove('hidden');
+  const progressBar = document.getElementById('create-progress');
+  const statusEl    = document.getElementById('create-status');
+  let created = 0, failed = 0;
+
+  for (let i = 1; i <= count; i++) {
+    const traderId = 'T' + String(i).padStart(2, '0');
+    const email    = traderId.toLowerCase() + '@tradingsim.app';
+    const name     = 'Trader ' + traderId;
+    try {
+      await createParticipantAccount(traderId, name, email, password, cash);
+      created++;
+    } catch (e) {
+      if (e.code === 'auth/email-already-in-use') { created++; }
+      else { failed++; console.warn(traderId, e.message); }
+    }
+    progressBar.style.width = ((i / count) * 100) + '%';
+    statusEl.textContent = `Progress: ${i}/${count} — Created: ${created}, Failed: ${failed}`;
+    await new Promise(r => setTimeout(r, 300)); // rate limit
+  }
+
+  showToast('Done!', `${created} accounts ready, ${failed} failed`, created > 0 ? 'success' : 'error');
+  loadParticipants();
+}
+
+async function createSingle() {
+  const traderId = document.getElementById('single-id').value.trim().toUpperCase();
+  const name     = document.getElementById('single-name').value.trim();
+  const cash     = parseFloat(document.getElementById('single-cash').value) || 1000000;
+  const password = document.getElementById('single-pass').value || 'Trade@123';
+  const statusEl = document.getElementById('single-status');
+
+  if (!traderId || !name) { showToast('Fill in Trader ID and Name', '', 'error'); return; }
+
+  const email = traderId.toLowerCase() + '@tradingsim.app';
+  try {
+    await createParticipantAccount(traderId, name, email, password, cash);
+    statusEl.innerHTML = `<span class="price-up">✓ Created ${traderId} successfully</span>`;
+    showToast('Account created', `${name} (${traderId})`, 'success');
+    loadParticipants();
+  } catch (e) {
+    if (e.code === 'auth/email-already-in-use') {
+      statusEl.innerHTML = `<span class="price-down">Account already exists</span>`;
+    } else {
+      statusEl.innerHTML = `<span class="price-down">${e.message}</span>`;
+    }
+  }
+}
+
+// Uses Firebase REST API to create user without signing out admin
+async function createParticipantAccount(traderId, name, email, password, cash) {
+  // Create user via Firebase Auth REST (avoids signing out admin)
+  const apiKey = 'AIzaSyBGpCLrRPyQbo5goUGt7oada3EVJnz4H6Y';
+  const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, returnSecureToken: true })
+  });
+  const data = await res.json();
+  if (data.error) throw Object.assign(new Error(data.error.message), { code: 'auth/' + data.error.message.toLowerCase().replace(/ /g,'-') });
+
+  const uid = data.localId;
+
+  // Save user profile + portfolio to Firestore (use admin SDK via db)
+  const batch = db.batch();
+  batch.set(db.doc(`users/${uid}`), {
+    uid, email, traderId, name,
+    role: 'participant',
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  batch.set(db.doc(`portfolios/${uid}`), {
+    cash, startingCash: cash,
+    holdings: {},
+    uid, traderId
+  });
+  batch.set(db.doc(`leaderboard/${uid}`), {
+    uid, name, traderId,
+    totalValue: cash,
+    cash, stockValue: 0,
+    startingCash: cash,
+    pnl: 0,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  await batch.commit();
+}
+
+async function loadParticipants() {
+  const grid = document.getElementById('participants-grid');
+  grid.innerHTML = '<div class="loading"><div class="spinner"></div> Loading…</div>';
+  const snap = await PATHS.users().where('role', '==', 'participant').orderBy('traderId').get();
+  if (snap.empty) {
+    grid.innerHTML = '<div class="empty-state"><div class="empty-title">No participants yet</div><div class="empty-sub">Use Bulk Create above</div></div>';
+    return;
+  }
+  grid.innerHTML = snap.docs.map(d => {
+    const u = d.data();
+    return `<div class="participant-card">
+      <div class="p-name">${u.name}</div>
+      <div class="p-id">${u.traderId}</div>
+      <div class="p-cash">${u.traderId.toLowerCase()}@tradingsim.app</div>
+    </div>`;
+  }).join('');
+}
+
+// ── Monitor ──────────────────────────────────
+async function refreshMonitor() {
+  const tbody = document.getElementById('monitor-tbody');
+  tbody.innerHTML = '<tr><td colspan="7" class="text-center muted" style="padding:24px"><div class="spinner" style="margin:auto"></div></td></tr>';
+
+  const [usersSnap, lbSnap] = await Promise.all([
+    PATHS.users().where('role','==','participant').orderBy('traderId').get(),
+    PATHS.leaderboard().get()
+  ]);
+
+  const lbMap = {};
+  lbSnap.forEach(d => { lbMap[d.id] = d.data(); });
+
+  tbody.innerHTML = usersSnap.docs.map(d => {
+    const u  = d.data();
+    const lb = lbMap[d.id] || {};
+    const tv = lb.totalValue || 0;
+    const sc = lb.startingCash || tv;
+    const pnl = tv - sc;
+    const pnlPct = sc > 0 ? (pnl / sc * 100) : 0;
+    const cls = pnl >= 0 ? 'price-up' : 'price-down';
+    return `<tr>
+      <td class="mono" style="color:var(--blue)">${u.traderId}</td>
+      <td>${u.name}</td>
+      <td class="mono">${formatINR(lb.cash)}</td>
+      <td class="mono">${formatINR(lb.stockValue)}</td>
+      <td class="mono bold">${formatINR(tv)}</td>
+      <td class="mono ${cls}">${pnl >= 0 ? '+' : ''}${formatINR(pnl)}</td>
+      <td class="mono ${cls}">${pnl >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="7" class="text-center muted" style="padding:24px">No participants</td></tr>';
+}
+
+// ── Leaderboard ──────────────────────────────
+PATHS.leaderboard().orderBy('totalValue','desc').onSnapshot(snap => {
+  const list = document.getElementById('lb-list');
+  if (!list) return;
+  if (snap.empty) { list.innerHTML = '<div class="empty-state"><div class="empty-icon">🏆</div><div class="empty-title">No data yet</div></div>'; return; }
+  const medals = ['🥇','🥈','🥉'];
+  const classes= ['gold','silver','bronze'];
+  list.innerHTML = snap.docs.map((d,i) => {
+    const lb = d.data();
+    const pnl = lb.pnl || 0;
+    const pnlPct = lb.startingCash > 0 ? (pnl / lb.startingCash * 100) : 0;
+    const cls = pnl >= 0 ? 'price-up' : 'price-down';
+    return `<div class="leaderboard-row">
+      <div class="lb-rank ${classes[i]||''}">${medals[i] || (i+1)}</div>
+      <div class="lb-avatar">${initials(lb.name)}</div>
+      <div><div class="lb-name">${lb.name}</div><div class="lb-id">${lb.traderId}</div></div>
+      <div style="margin-left:auto;text-align:right">
+        <div class="lb-value">${formatINR(lb.totalValue)}</div>
+        <div class="lb-change ${cls}">${pnl>=0?'+':''}${formatINR(pnl)} (${pnlPct.toFixed(2)}%)</div>
+      </div>
+    </div>`;
+  }).join('');
+});
+
+// ── All Trades ───────────────────────────────
+PATHS.trades().orderBy('timestamp','desc').limit(200).onSnapshot(snap => {
+  const tbody = document.getElementById('trades-tbody');
+  if (!tbody) return;
+  if (snap.empty) { tbody.innerHTML = '<tr><td colspan="9" class="text-center muted" style="padding:32px">No trades yet</td></tr>'; return; }
+  tbody.innerHTML = snap.docs.map((d,i) => {
+    const t = d.data();
+    const typeBadge = t.type === 'bilateral'
+      ? '<span style="color:var(--gold);font-size:10px">BILATERAL</span>'
+      : '<span style="color:var(--text-muted);font-size:10px">LIMIT</span>';
+    return `<tr>
+      <td class="muted">${i+1}</td>
+      <td class="muted" style="font-size:11px">${timeSince(t.timestamp)}</td>
+      <td class="mono" style="color:var(--blue)">${t.symbol}</td>
+      <td>${t.buyerTraderId} <span class="muted">${t.buyerName||''}</span></td>
+      <td>${t.sellerTraderId} <span class="muted">${t.sellerName||''}</span></td>
+      <td class="mono">${formatINR(t.price)}</td>
+      <td class="mono">${formatQty(t.quantity)}</td>
+      <td class="mono">${formatINR(t.cost)}</td>
+      <td>${typeBadge}</td>
+    </tr>`;
+  }).join('');
+});
+
+// load news when section shown (defer)
+document.querySelector('[onclick="showSection(\'news\')"]').addEventListener('click', loadNewsLog);
+document.querySelector('[onclick="showSection(\'monitor\')"]').addEventListener('click', refreshMonitor);
+</script>
+</body>
+</html>

@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TradeSim — Dashboard</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .holdings-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:10px; }
+    .holding-card  { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); padding:14px; }
+    .holding-sym   { font-family:var(--font-mono); font-weight:700; color:var(--blue); }
+    .holding-name  { font-size:11px; color:var(--text-muted); margin:2px 0 8px; }
+    .holding-qty   { font-size:20px; font-weight:700; font-family:var(--font-mono); }
+    .holding-val   { font-size:12px; color:var(--text-muted); }
+  </style>
+</head>
+<body>
+<div class="app-shell">
+  <!-- Topbar -->
+  <header class="topbar">
+    <a href="dashboard.html" class="topbar-logo"><div class="topbar-logo-icon">📈</div> TradeSim</a>
+    <div class="topbar-divider"></div>
+    <div class="topbar-title" id="page-label">Dashboard</div>
+    <div id="session-badge" class="session-badge inactive"><span class="dot"></span> Inactive</div>
+    <div class="topbar-user" id="user-bar">
+      <div class="topbar-avatar" id="user-avatar">?</div>
+      <div>
+        <div class="topbar-username" id="user-name">Loading…</div>
+        <div class="topbar-traderid" id="user-tid">—</div>
+      </div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="logout()">Logout</button>
+  </header>
+
+  <!-- Sidebar -->
+  <nav class="sidebar" id="sidebar">
+    <div class="nav-section-label">Trading</div>
+    <a class="nav-item active" onclick="showSection('dashboard')"><span class="nav-icon">🏠</span> Dashboard</a>
+    <a class="nav-item" href="trade.html"><span class="nav-icon">📊</span> Markets &amp; Trade</a>
+    <a class="nav-item" onclick="showSection('bilateral')"><span class="nav-icon">🤝</span> Bilateral Orders <span class="nav-badge hidden" id="bilateral-badge">0</span></a>
+    <div class="nav-section-label">Info</div>
+    <a class="nav-item" href="leaderboard.html"><span class="nav-icon">🏆</span> Leaderboard</a>
+    <a class="nav-item" onclick="showSection('history')"><span class="nav-icon">📋</span> My Trades</a>
+    <div class="sidebar-logout">
+      <button class="btn btn-ghost btn-full btn-sm" onclick="logout()">🚪 Logout</button>
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <main class="main-content">
+    <div id="toast-container"></div>
+    <div id="news-ticker"></div>
+
+    <!-- ══ DASHBOARD ══ -->
+    <section id="dashboard-section">
+      <div class="page-header">
+        <div><h1 class="page-title">My Portfolio</h1><p class="page-subtitle" id="greeting">Welcome back</p></div>
+        <button class="btn btn-ghost btn-sm" onclick="refreshPortfolio()">🔄 Refresh</button>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Cash Balance</div>
+          <div class="stat-value mono" id="stat-cash">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Stock Value</div>
+          <div class="stat-value mono" id="stat-stocks">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Portfolio</div>
+          <div class="stat-value mono bold" id="stat-total">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">P&amp;L</div>
+          <div class="stat-value mono" id="stat-pnl">—</div>
+          <div class="stat-sub" id="stat-pnl-pct">—</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title" style="margin:0">Holdings</div>
+          <a href="trade.html" class="btn btn-primary btn-sm">📊 Trade Now</a>
+        </div>
+        <div id="holdings-area">
+          <div class="loading"><div class="spinner"></div> Loading…</div>
+        </div>
+      </div>
+
+      <div class="card mt-4">
+        <div class="card-title">My Open Orders</div>
+        <div id="open-orders-area">
+          <div class="loading"><div class="spinner"></div> Loading…</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ BILATERAL ORDERS ══ -->
+    <section id="bilateral-section" class="hidden">
+      <div class="page-header">
+        <div><h1 class="page-title">Bilateral Orders</h1><p class="page-subtitle">Negotiate trades directly with another trader</p></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
+        <!-- Send new -->
+        <div class="card">
+          <div class="card-title">Send a Trade Proposal</div>
+          <div class="form-group">
+            <label class="form-label">Select Security</label>
+            <select class="form-select" id="bi-symbol"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">I want to…</label>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-success" id="bi-buy-btn"  onclick="setBiSide('buy')">BUY</button>
+              <button class="btn btn-ghost"   id="bi-sell-btn" onclick="setBiSide('sell')">SELL</button>
+            </div>
+            <input type="hidden" id="bi-side" value="buy">
+          </div>
+          <div class="input-row">
+            <div class="form-group">
+              <label class="form-label">Price (₹)</label>
+              <input class="form-input" id="bi-price" type="number" placeholder="0.00" step="0.05" min="0.01">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Quantity</label>
+              <input class="form-input" id="bi-qty" type="number" placeholder="0" min="1" step="1">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Send to Trader</label>
+            <select class="form-select" id="bi-to"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Message (optional)</label>
+            <input class="form-input" id="bi-msg" type="text" placeholder="e.g. Deal at ₹1500?">
+          </div>
+          <div id="bi-preview" class="alert alert-info hidden"></div>
+          <button class="btn btn-primary btn-full" onclick="submitBilateral()">📨 Send Proposal</button>
+        </div>
+
+        <!-- Inbox -->
+        <div>
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-title">📥 Incoming Proposals</div>
+            <div id="bi-incoming">
+              <div class="loading"><div class="spinner"></div></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">📤 My Sent Proposals</div>
+            <div id="bi-outgoing">
+              <div class="loading"><div class="spinner"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ TRADE HISTORY ══ -->
+    <section id="history-section" class="hidden">
+      <div class="page-header">
+        <div><h1 class="page-title">My Trades</h1><p class="page-subtitle">Your complete transaction history</p></div>
+      </div>
+      <div class="card">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Time</th><th>Symbol</th><th>Side</th><th>Counterparty</th><th>Price</th><th>Qty</th><th>Value</th><th>Type</th></tr>
+            </thead>
+            <tbody id="history-tbody">
+              <tr><td colspan="8" class="text-center muted" style="padding:32px"><div class="spinner" style="margin:auto"></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="js/config.js"></script>
+<script src="js/securities.js"></script>
+<script src="js/engine.js"></script>
+<script>
+let ME = null; // { uid, traderId, name }
+
+// ── Auth guard ──────────────────────────────
+auth.onAuthStateChanged(async (user) => {
+  if (!user) { window.location.href = 'index.html'; return; }
+  const snap = await db.doc(`users/${user.uid}`).get();
+  if (!snap.exists) { window.location.href = 'index.html'; return; }
+  const u = snap.data();
+  if (u.role === 'admin') { window.location.href = 'admin.html'; return; }
+  ME = { uid: user.uid, traderId: u.traderId, name: u.name };
+
+  document.getElementById('user-name').textContent  = u.name;
+  document.getElementById('user-tid').textContent   = u.traderId;
+  document.getElementById('user-avatar').textContent = initials(u.name);
+  document.getElementById('greeting').textContent   = `Good ${timeOfDay()}, ${u.name.split(' ')[0]}!`;
+
+  initDashboard();
+});
+
+function logout() { auth.signOut().then(() => window.location.href = 'index.html'); }
+function timeOfDay() { const h = new Date().getHours(); return h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening'; }
+
+// ── Section nav ──────────────────────────────
+function showSection(id) {
+  document.querySelectorAll('main > section').forEach(s => s.classList.add('hidden'));
+  document.getElementById(id + '-section').classList.remove('hidden');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  event.currentTarget.classList.add('active');
+  if (id === 'bilateral') loadBilateral();
+  if (id === 'history')   loadHistory();
+}
+
+// ── Init ─────────────────────────────────────
+function initDashboard() {
+  listenSession();
+  listenPortfolio();
+  listenOpenOrders();
+  listenNewsForTicker();
+  populateBiSelects();
+}
+
+// ── Session ──────────────────────────────────
+function listenSession() {
+  PATHS.session().onSnapshot(snap => {
+    const s = snap.exists ? snap.data().status : 'inactive';
+    const badge = document.getElementById('session-badge');
+    badge.className = `session-badge ${s}`;
+    badge.innerHTML = `<span class="dot"></span> ${s.charAt(0).toUpperCase()+s.slice(1)}`;
+  });
+}
+
+// ── Portfolio ─────────────────────────────────
+function listenPortfolio() {
+  PATHS.portfolio(ME.uid).onSnapshot(async (snap) => {
+    if (!snap.exists) return;
+    const port = snap.data();
+    const pricesSnap = await PATHS.prices().get();
+    const prices = {};
+    pricesSnap.forEach(d => prices[d.id] = d.data());
+
+    let stockVal = 0;
+    for (const [sym, qty] of Object.entries(port.holdings || {})) {
+      stockVal += (prices[sym]?.price || 0) * qty;
+    }
+
+    const total = port.cash + stockVal;
+    const pnl   = total - (port.startingCash || total);
+    const pnlPct = port.startingCash > 0 ? (pnl / port.startingCash * 100) : 0;
+    const pnlCls  = pnl >= 0 ? 'stat-up' : 'stat-down';
+
+    document.getElementById('stat-cash').textContent   = formatINR(port.cash);
+    document.getElementById('stat-stocks').textContent = formatINR(stockVal);
+    document.getElementById('stat-total').textContent  = formatINR(total);
+    document.getElementById('stat-pnl').innerHTML      = `<span class="${pnlCls}">${pnl>=0?'+':''}${formatINR(pnl)}</span>`;
+    document.getElementById('stat-pnl-pct').innerHTML  = `<span class="${pnlCls}">${pnl>=0?'+':''}${pnlPct.toFixed(2)}%</span>`;
+
+    renderHoldings(port.holdings || {}, prices);
+
+    // Update leaderboard entry
+    await PATHS.leaderboard().doc(ME.uid).set({
+      uid: ME.uid, name: ME.name, traderId: ME.traderId,
+      totalValue: total, cash: port.cash, stockValue: stockVal,
+      startingCash: port.startingCash || total, pnl,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+  });
+}
+
+function renderHoldings(holdings, prices) {
+  const area = document.getElementById('holdings-area');
+  const entries = Object.entries(holdings).filter(([,qty]) => qty !== 0);
+  if (entries.length === 0) {
+    area.innerHTML = '<div class="empty-state"><div class="empty-icon">📦</div><div class="empty-title">No holdings yet</div><div class="empty-sub">Go to Markets to place your first trade</div></div>';
+    return;
+  }
+  area.innerHTML = `<div class="holdings-grid">${entries.map(([sym, qty]) => {
+    const p    = prices[sym];
+    const price = p?.price || 0;
+    const val   = price * qty;
+    const isShort = qty < 0;
+    const cls  = isShort ? 'holding-short' : (qty > 0 ? '' : 'holding-down');
+    const change = p ? (p.changePct || 0) : 0;
+    const chgCls = change >= 0 ? 'price-up' : 'price-down';
+    return `<div class="holding-card">
+      <div class="holding-sym">${sym}</div>
+      <div class="holding-name">${p?.name || sym}</div>
+      <div class="holding-qty ${cls}">${isShort ? 'SHORT ' : ''}${formatQty(Math.abs(qty))} shares</div>
+      <div class="holding-val">${formatINR(val)} @ ${formatINR(price)} <span class="${chgCls}">${pct(change)}</span></div>
+      <a href="trade.html?sym=${sym}" class="btn btn-ghost btn-sm btn-full mt-2">Trade ${sym}</a>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+async function refreshPortfolio() {
+  showToast('Refreshing…', '', 'info');
+}
+
+// ── Open Orders ──────────────────────────────
+function listenOpenOrders() {
+  const area = document.getElementById('open-orders-area');
+  // Listen to bids and asks across all symbols for this user
+  // We aggregate by listening to user's orders collection (we'll store an index)
+  // Simpler: just fetch all open orders on demand
+  loadOpenOrders(area);
+}
+
+async function loadOpenOrders(area) {
+  area.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+  let orders = [];
+  for (const sec of SECURITIES) {
+    const [bidsSnap, asksSnap] = await Promise.all([
+      PATHS.bids(sec.symbol).where('uid','==',ME.uid).get(),
+      PATHS.asks(sec.symbol).where('uid','==',ME.uid).get()
+    ]);
+    bidsSnap.forEach(d => orders.push({ ...d.data(), id: d.id, symbol: sec.symbol, side: 'buy' }));
+    asksSnap.forEach(d => orders.push({ ...d.data(), id: d.id, symbol: sec.symbol, side: 'sell' }));
+  }
+
+  if (orders.length === 0) {
+    area.innerHTML = '<div class="empty-state"><div class="empty-icon">📑</div><div class="empty-title">No open orders</div></div>';
+    return;
+  }
+
+  area.innerHTML = `<div class="table-wrap"><table class="data-table">
+    <thead><tr><th>Symbol</th><th>Side</th><th>Price</th><th>Qty</th><th>Remaining</th><th>Action</th></tr></thead>
+    <tbody>${orders.map(o => {
+      const sideCls = o.side === 'buy' ? 'price-up' : 'price-down';
+      return `<tr>
+        <td class="mono" style="color:var(--blue)">${o.symbol}</td>
+        <td class="bold ${sideCls}">${o.side.toUpperCase()}</td>
+        <td class="mono">${formatINR(o.price)}</td>
+        <td class="mono">${formatQty(o.quantity)}</td>
+        <td class="mono">${formatQty(o.remainingQty)}</td>
+        <td><button class="btn btn-danger btn-sm" onclick="cancelMyOrder('${o.symbol}','${o.side}','${o.id}', this)">Cancel</button></td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>`;
+}
+
+async function cancelMyOrder(symbol, side, id, btn) {
+  btn.disabled = true;
+  try {
+    await cancelOrder(symbol, side, id);
+    showToast('Order cancelled', `${side.toUpperCase()} ${symbol}`, 'success');
+    loadOpenOrders(document.getElementById('open-orders-area'));
+  } catch(e) { showToast('Error', e.message, 'error'); btn.disabled = false; }
+}
+
+// ── News Ticker ──────────────────────────────
+function listenNewsForTicker() {
+  PATHS.news().orderBy('timestamp','desc').limit(1).onSnapshot(snap => {
+    if (snap.empty) return;
+    const n = snap.docs[0].data();
+    const ticker = document.getElementById('news-ticker');
+    const sign = n.changePercent >= 0 ? '+' : '';
+    const cls  = n.changePercent >= 0 ? 'price-up' : 'price-down';
+    ticker.innerHTML = `<div class="news-banner">
+      📰 <strong>${n.symbol}</strong>: ${n.headline} — Price impact: <span class="${cls}">${sign}${n.changePercent}%</span>
+    </div>`;
+    setTimeout(() => { ticker.innerHTML = ''; }, 30000);
+  });
+}
+
+// ── Bilateral ────────────────────────────────
+function populateBiSelects() {
+  const symSel = document.getElementById('bi-symbol');
+  SECURITIES.forEach(s => {
+    const o = document.createElement('option');
+    o.value = s.symbol; o.textContent = `${s.symbol} — ${s.name}`;
+    symSel.appendChild(o);
+  });
+
+  // Load traders list
+  PATHS.users().where('role','==','participant').get().then(snap => {
+    const toSel = document.getElementById('bi-to');
+    snap.forEach(d => {
+      if (d.id === ME.uid) return;
+      const u = d.data();
+      const o = document.createElement('option');
+      o.value = d.id; o.dataset.tid = u.traderId; o.dataset.name = u.name;
+      o.textContent = `${u.traderId} — ${u.name}`;
+      toSel.appendChild(o);
+    });
+  });
+
+  // Preview
+  ['bi-symbol','bi-price','bi-qty','bi-side'].forEach(id => {
+    document.getElementById(id)?.addEventListener('change', updateBiPreview);
+    document.getElementById(id)?.addEventListener('input', updateBiPreview);
+  });
+}
+
+function setBiSide(side) {
+  document.getElementById('bi-side').value = side;
+  document.getElementById('bi-buy-btn').className  = side==='buy'  ? 'btn btn-success' : 'btn btn-ghost';
+  document.getElementById('bi-sell-btn').className = side==='sell' ? 'btn btn-danger'  : 'btn btn-ghost';
+  updateBiPreview();
+}
+
+function updateBiPreview() {
+  const sym  = document.getElementById('bi-symbol').value;
+  const side = document.getElementById('bi-side').value;
+  const price= parseFloat(document.getElementById('bi-price').value);
+  const qty  = parseInt(document.getElementById('bi-qty').value);
+  const box  = document.getElementById('bi-preview');
+  if (sym && price > 0 && qty > 0) {
+    const total = price * qty;
+    box.className = `alert ${side==='buy' ? 'alert-success' : 'alert-warning'}`;
+    box.textContent = `${side.toUpperCase()} ${formatQty(qty)} × ${sym} @ ${formatINR(price)} = ${formatINR(total)}`;
+    box.classList.remove('hidden');
+  } else { box.classList.add('hidden'); }
+}
+
+async function submitBilateral() {
+  const sel    = document.getElementById('bi-to');
+  const toOpt  = sel.options[sel.selectedIndex];
+  if (!toOpt) { showToast('Select a counterparty', '', 'error'); return; }
+
+  try {
+    await sendBilateralOrder({
+      fromUid: ME.uid, fromTraderId: ME.traderId, fromName: ME.name,
+      toUid:   toOpt.value, toTraderId: toOpt.dataset.tid, toName: toOpt.dataset.name,
+      symbol:  document.getElementById('bi-symbol').value,
+      side:    document.getElementById('bi-side').value,
+      price:   document.getElementById('bi-price').value,
+      quantity:document.getElementById('bi-qty').value,
+      message: document.getElementById('bi-msg').value
+    });
+    showToast('Proposal sent!', `Waiting for ${toOpt.dataset.name} to respond`, 'success');
+    document.getElementById('bi-price').value = '';
+    document.getElementById('bi-qty').value   = '';
+    document.getElementById('bi-msg').value   = '';
+    document.getElementById('bi-preview').classList.add('hidden');
+    loadBilateral();
+  } catch(e) { showToast('Error', e.message, 'error'); }
+}
+
+function loadBilateral() {
+  // Incoming — orders where toUid = ME.uid and status = pending
+  PATHS.bilateral().where('toUid','==',ME.uid).where('status','==','pending')
+    .orderBy('timestamp','desc').onSnapshot(snap => {
+      const div = document.getElementById('bi-incoming');
+      const badge = document.getElementById('bilateral-badge');
+      badge.textContent = snap.size;
+      badge.classList.toggle('hidden', snap.size === 0);
+
+      if (snap.empty) { div.innerHTML = '<div class="empty-state"><div class="empty-icon">📥</div><div class="empty-title">No incoming proposals</div></div>'; return; }
+      div.innerHTML = snap.docs.map(d => {
+        const o = d.data();
+        const side = o.side === 'buy' ? `<span class="price-up">BUY</span>` : `<span class="price-down">SELL</span>`;
+        // from their perspective: they want to BUY → you are SELLING to them
+        const yourRole = o.side === 'buy' ? '(you SELL)' : '(you BUY)';
+        return `<div class="bilateral-card incoming">
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+            <strong>${o.fromName} <span class="muted">${o.fromTraderId}</span></strong>
+            <span class="muted" style="font-size:11px">${timeSince(o.timestamp)}</span>
+          </div>
+          <div style="font-size:13px;margin-bottom:6px">
+            Wants to ${side} <strong>${formatQty(o.quantity)} ${o.symbol}</strong> @ <strong>${formatINR(o.price)}</strong> ${yourRole}
+          </div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Total: ${formatINR(o.price*o.quantity)}${o.message ? ' — "'+o.message+'"' : ''}</div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-success btn-sm" onclick="handleBilateral('${d.id}','accept',this)">✓ Accept</button>
+            <button class="btn btn-danger  btn-sm" onclick="handleBilateral('${d.id}','reject',this)">✗ Reject</button>
+          </div>
+        </div>`;
+      }).join('');
+    });
+
+  // Outgoing
+  PATHS.bilateral().where('fromUid','==',ME.uid)
+    .orderBy('timestamp','desc').limit(20).onSnapshot(snap => {
+      const div = document.getElementById('bi-outgoing');
+      if (snap.empty) { div.innerHTML = '<div class="empty-state"><div class="empty-icon">📤</div><div class="empty-title">No sent proposals</div></div>'; return; }
+      div.innerHTML = snap.docs.map(d => {
+        const o = d.data();
+        const statusCls = { pending:'alert-info', accepted:'alert-success', rejected:'alert-error' }[o.status] || 'alert-info';
+        const statusIcon = { pending:'⏳', accepted:'✅', rejected:'❌' }[o.status] || '⏳';
+        return `<div class="bilateral-card outgoing" style="margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between">
+            <span>To <strong>${o.toName}</strong> — ${o.side.toUpperCase()} ${formatQty(o.quantity)} ${o.symbol} @ ${formatINR(o.price)}</span>
+            <span>${statusIcon} ${o.status}</span>
+          </div>
+        </div>`;
+      }).join('');
+    });
+}
+
+async function handleBilateral(id, action, btn) {
+  btn.disabled = true;
+  try {
+    if (action === 'accept') {
+      await acceptBilateral(id);
+      showToast('Trade executed!', 'Bilateral trade completed', 'success');
+    } else {
+      await rejectBilateral(id);
+      showToast('Proposal rejected', '', 'info');
+    }
+  } catch(e) {
+    showToast('Error', e.message, 'error');
+    btn.disabled = false;
+  }
+}
+
+// ── Trade History ─────────────────────────────
+async function loadHistory() {
+  const tbody = document.getElementById('history-tbody');
+  const buyerSnap  = await PATHS.trades().where('buyerUid','==',ME.uid).orderBy('timestamp','desc').limit(100).get();
+  const sellerSnap = await PATHS.trades().where('sellerUid','==',ME.uid).orderBy('timestamp','desc').limit(100).get();
+
+  const trades = [];
+  buyerSnap.forEach(d  => trades.push({ ...d.data(), myRole: 'buy' }));
+  sellerSnap.forEach(d => trades.push({ ...d.data(), myRole: 'sell' }));
+  trades.sort((a,b) => (b.timestamp?.toMillis?.() || 0) - (a.timestamp?.toMillis?.() || 0));
+
+  if (trades.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center muted" style="padding:32px">No trades yet</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = trades.map(t => {
+    const sideCls = t.myRole === 'buy' ? 'price-up' : 'price-down';
+    const counterparty = t.myRole === 'buy' ? `${t.sellerTraderId}` : `${t.buyerTraderId}`;
+    const typeBadge = t.type === 'bilateral'
+      ? '<span style="color:var(--gold);font-size:10px">BILATERAL</span>'
+      : '<span style="color:var(--text-muted);font-size:10px">LIMIT</span>';
+    return `<tr>
+      <td class="muted" style="font-size:11px">${timeSince(t.timestamp)}</td>
+      <td class="mono" style="color:var(--blue)">${t.symbol}</td>
+      <td class="bold ${sideCls}">${t.myRole.toUpperCase()}</td>
+      <td class="mono">${counterparty}</td>
+      <td class="mono">${formatINR(t.price)}</td>
+      <td class="mono">${formatQty(t.quantity)}</td>
+      <td class="mono">${formatINR(t.cost)}</td>
+      <td>${typeBadge}</td>
+    </tr>`;
+  }).join('');
+}
+</script>
+</body>
+</html>

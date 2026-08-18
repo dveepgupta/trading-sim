@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TradeSim — Leaderboard</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .lb-header-row {
+      display: grid;
+      grid-template-columns: 50px 44px 1fr 160px 140px 120px;
+      gap: 12px;
+      padding: 8px 16px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-muted);
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 8px;
+    }
+    .lb-row {
+      display: grid;
+      grid-template-columns: 50px 44px 1fr 160px 140px 120px;
+      gap: 12px;
+      padding: 14px 16px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      margin-bottom: 6px;
+      align-items: center;
+      transition: background 0.15s;
+    }
+    .lb-row:hover { background: var(--card-hover); }
+    .lb-row.me    { border-color: var(--blue); background: var(--blue-dim); }
+    .lb-row.gold-row   { border-color: var(--gold);  }
+    .lb-row.silver-row { border-color: #b0b8c8; }
+    .lb-row.bronze-row { border-color: #cd7f32; }
+    .lb-sparkline { display:inline-block; width:60px; height:24px; vertical-align:middle; }
+    @media(max-width:700px) {
+      .lb-header-row, .lb-row {
+        grid-template-columns: 40px 36px 1fr 120px;
+      }
+      .lb-header-row > *:nth-child(5),
+      .lb-header-row > *:nth-child(6),
+      .lb-row > *:nth-child(5),
+      .lb-row > *:nth-child(6) { display: none; }
+    }
+  </style>
+</head>
+<body>
+<div class="app-shell">
+  <!-- Topbar -->
+  <header class="topbar">
+    <a href="dashboard.html" class="topbar-logo"><div class="topbar-logo-icon">📈</div> TradeSim</a>
+    <div class="topbar-divider"></div>
+    <div class="topbar-title">Leaderboard</div>
+    <div id="session-badge" class="session-badge inactive"><span class="dot"></span> Inactive</div>
+    <div class="topbar-user">
+      <div class="topbar-avatar" id="user-avatar">?</div>
+      <div><div class="topbar-username" id="user-name">—</div><div class="topbar-traderid" id="user-tid">—</div></div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="auth.signOut().then(()=>location.href='index.html')">Logout</button>
+  </header>
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="nav-section-label">Trading</div>
+    <a class="nav-item" href="dashboard.html"><span class="nav-icon">🏠</span> Dashboard</a>
+    <a class="nav-item" href="trade.html"><span class="nav-icon">📊</span> Markets &amp; Trade</a>
+    <a class="nav-item" href="dashboard.html"><span class="nav-icon">🤝</span> Bilateral Orders</a>
+    <div class="nav-section-label">Info</div>
+    <a class="nav-item active"><span class="nav-icon">🏆</span> Leaderboard</a>
+    <a class="nav-item" href="dashboard.html"><span class="nav-icon">📋</span> My Trades</a>
+    <div class="sidebar-logout">
+      <button class="btn btn-ghost btn-full btn-sm" onclick="auth.signOut().then(()=>location.href='index.html')">🚪 Logout</button>
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <main class="main-content">
+    <div id="toast-container"></div>
+
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">🏆 Leaderboard</h1>
+        <p class="page-subtitle">Live rankings by total portfolio value — updates in real time</p>
+      </div>
+      <div id="my-rank-badge" class="hidden alert alert-info">Your rank: <strong id="my-rank-text">—</strong></div>
+    </div>
+
+    <!-- Top 3 podium -->
+    <div id="podium" style="display:flex;gap:12px;justify-content:center;margin-bottom:28px;flex-wrap:wrap"></div>
+
+    <!-- Full list -->
+    <div class="card" style="padding:16px">
+      <div class="lb-header-row">
+        <span>Rank</span>
+        <span></span>
+        <span>Trader</span>
+        <span style="text-align:right">Portfolio Value</span>
+        <span style="text-align:right">P&amp;L</span>
+        <span style="text-align:right">P&amp;L %</span>
+      </div>
+      <div id="lb-list">
+        <div class="loading"><div class="spinner"></div> Loading…</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="js/config.js"></script>
+<script src="js/engine.js"></script>
+<script>
+let ME_UID = null;
+
+auth.onAuthStateChanged(async (user) => {
+  if (!user) { window.location.href = 'index.html'; return; }
+  const snap = await db.doc(`users/${user.uid}`).get();
+  if (!snap.exists) { window.location.href = 'index.html'; return; }
+  const u = snap.data();
+  ME_UID = user.uid;
+  document.getElementById('user-name').textContent   = u.name;
+  document.getElementById('user-tid').textContent    = u.traderId;
+  document.getElementById('user-avatar').textContent = initials(u.name);
+
+  listenSession();
+  listenLeaderboard();
+});
+
+function listenSession() {
+  PATHS.session().onSnapshot(snap => {
+    const s = snap.exists ? snap.data().status : 'inactive';
+    const badge = document.getElementById('session-badge');
+    badge.className = `session-badge ${s}`;
+    badge.innerHTML = `<span class="dot"></span> ${s.charAt(0).toUpperCase()+s.slice(1)}`;
+  });
+}
+
+function listenLeaderboard() {
+  PATHS.leaderboard().orderBy('totalValue','desc').onSnapshot(snap => {
+    if (snap.empty) {
+      document.getElementById('lb-list').innerHTML = '<div class="empty-state"><div class="empty-icon">🏆</div><div class="empty-title">No data yet</div><div class="empty-sub">Leaderboard updates after first trade</div></div>';
+      document.getElementById('podium').innerHTML = '';
+      return;
+    }
+
+    const entries = snap.docs.map((d, i) => ({ ...d.data(), rank: i + 1, uid: d.id }));
+    renderPodium(entries.slice(0, 3));
+    renderList(entries);
+
+    const myEntry = entries.find(e => e.uid === ME_UID);
+    if (myEntry) {
+      const badge = document.getElementById('my-rank-badge');
+      badge.classList.remove('hidden');
+      document.getElementById('my-rank-text').textContent = `#${myEntry.rank} of ${entries.length}`;
+    }
+  });
+}
+
+function renderPodium(top3) {
+  const podiumEl = document.getElementById('podium');
+  const medals   = ['🥇','🥈','🥉'];
+  const colors   = ['#f0b429','#b0b8c8','#cd7f32'];
+  const order    = [1, 0, 2]; // display order: 2nd, 1st, 3rd
+
+  podiumEl.innerHTML = order.filter(i => top3[i]).map(i => {
+    const e   = top3[i];
+    const pnl = e.pnl || 0;
+    const sc  = e.startingCash || e.totalValue;
+    const pnlPct = sc > 0 ? (pnl / sc * 100) : 0;
+    const cls = pnl >= 0 ? 'price-up' : 'price-down';
+    return `<div style="
+      background:var(--card);border:2px solid ${colors[i]};border-radius:var(--radius-lg);
+      padding:20px 24px;text-align:center;min-width:160px;max-width:200px;flex:1;
+      ${i===0 ? 'transform:scale(1.05);box-shadow:0 0 24px rgba(240,180,41,0.2)' : ''}
+    ">
+      <div style="font-size:32px;margin-bottom:8px">${medals[i]}</div>
+      <div style="width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,var(--blue),var(--purple));
+        display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;margin:0 auto 8px;">
+        ${initials(e.name)}
+      </div>
+      <div style="font-weight:700;font-size:14px">${e.name}</div>
+      <div style="color:var(--text-muted);font-size:11px;font-family:var(--font-mono);margin-bottom:8px">${e.traderId}</div>
+      <div style="font-size:18px;font-weight:800;font-family:var(--font-mono);color:var(--green)">${formatINR(e.totalValue)}</div>
+      <div style="font-size:12px;font-family:var(--font-mono)" class="${cls}">
+        ${pnl>=0?'+':''}${pnlPct.toFixed(2)}%
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderList(entries) {
+  const medals  = ['🥇','🥈','🥉'];
+  const rowCls  = ['gold-row','silver-row','bronze-row'];
+  const list    = document.getElementById('lb-list');
+
+  list.innerHTML = entries.map((e, i) => {
+    const pnl    = e.pnl || 0;
+    const sc     = e.startingCash || e.totalValue;
+    const pnlPct = sc > 0 ? (pnl / sc * 100) : 0;
+    const cls    = pnl >= 0 ? 'price-up' : 'price-down';
+    const me     = e.uid === ME_UID ? 'me' : '';
+    const rc     = rowCls[i] || '';
+    return `<div class="lb-row ${me} ${rc}">
+      <div style="font-family:var(--font-mono);font-weight:800;color:var(--text-muted);text-align:center">
+        ${medals[i] || (i+1)}
+      </div>
+      <div style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,var(--blue),var(--purple));
+        display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff">
+        ${initials(e.name)}
+      </div>
+      <div>
+        <div style="font-weight:600">${e.name} ${me ? '<span style="font-size:10px;color:var(--blue)">(You)</span>' : ''}</div>
+        <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono)">${e.traderId}</div>
+      </div>
+      <div style="text-align:right;font-family:var(--font-mono);font-weight:700;color:var(--green)">${formatINR(e.totalValue)}</div>
+      <div style="text-align:right;font-family:var(--font-mono)" class="${cls}">${pnl>=0?'+':''}${formatINR(Math.abs(pnl))}</div>
+      <div style="text-align:right;font-family:var(--font-mono)" class="${cls}">${pnl>=0?'+':''}${pnlPct.toFixed(2)}%</div>
+    </div>`;
+  }).join('');
+}
+</script>
+</body>
+</html>

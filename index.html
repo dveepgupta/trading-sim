@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TradeSim — Login</title>
+  <meta name="description" content="Stock Market Trading Simulation Platform">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="auth-page">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <div class="auth-logo-icon">📈</div>
+      <div>
+        <div class="auth-logo-text">TradeSim</div>
+        <div class="auth-logo-sub">Market Simulation</div>
+      </div>
+    </div>
+
+    <h1 class="auth-title">Welcome Back</h1>
+    <p class="auth-subtitle">Sign in to access the trading platform</p>
+
+    <div id="alert-box" class="hidden"></div>
+
+    <form id="login-form">
+      <div class="form-group">
+        <label class="form-label" for="email">Trader ID / Email</label>
+        <input class="form-input" id="email" type="text" placeholder="e.g. T01 or admin" autocomplete="username" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="password">Password</label>
+        <input class="form-input" id="password" type="password" placeholder="Your password" autocomplete="current-password" required>
+      </div>
+      <button class="btn btn-primary btn-full btn-lg" type="submit" id="login-btn">
+        Sign In
+      </button>
+    </form>
+
+    <p style="text-align:center;margin-top:20px;font-size:12px;color:var(--text-muted)">
+      Contact your admin if you forgot your credentials
+    </p>
+  </div>
+</div>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="js/config.js"></script>
+<script>
+  // If already logged in, redirect
+  auth.onAuthStateChanged(async (user) => {
+    if (user) {
+      const snap = await db.doc(`users/${user.uid}`).get();
+      if (snap.exists) {
+        const role = snap.data().role;
+        window.location.href = role === 'admin' ? 'admin.html' : 'dashboard.html';
+      }
+    }
+  });
+
+  function showAlert(msg, type = 'error') {
+    const box = document.getElementById('alert-box');
+    box.className = `alert alert-${type}`;
+    box.textContent = msg;
+    box.classList.remove('hidden');
+  }
+
+  document.getElementById('login-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('login-btn');
+    btn.disabled = true;
+    btn.textContent = 'Signing in…';
+
+    let emailInput = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+
+    // Convert short trader IDs to email format
+    // admin → admin@tradingsim.app
+    // T01   → t01@tradingsim.app
+    if (!emailInput.includes('@')) {
+      emailInput = emailInput.toLowerCase() + '@tradingsim.app';
+    }
+
+    try {
+      await auth.signInWithEmailAndPassword(emailInput, password);
+      // onAuthStateChanged will redirect
+    } catch (err) {
+      let msg = 'Login failed. Check your credentials.';
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        msg = 'Invalid Trader ID or password.';
+      } else if (err.code === 'auth/too-many-requests') {
+        msg = 'Too many attempts. Please wait a moment.';
+      }
+      showAlert(msg);
+      btn.disabled = false;
+      btn.textContent = 'Sign In';
+    }
+  });
+</script>
+</body>
+</html>

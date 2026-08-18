@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TradeSim — First-Time Setup</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="auth-page">
+  <div class="auth-card" style="max-width:500px">
+    <div class="auth-logo">
+      <div class="auth-logo-icon">⚙️</div>
+      <div>
+        <div class="auth-logo-text">TradeSim Setup</div>
+        <div class="auth-logo-sub">One-time Admin Setup</div>
+      </div>
+    </div>
+
+    <h1 class="auth-title" style="font-size:20px">Create Admin Account</h1>
+    <p class="auth-subtitle">This page creates your admin account. Run it once, then use index.html to log in.</p>
+
+    <div id="alert-box" class="hidden"></div>
+
+    <form id="setup-form">
+      <div class="form-group">
+        <label class="form-label">Admin Name</label>
+        <input class="form-input" id="admin-name" type="text" placeholder="Your name" value="Admin" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Admin Password</label>
+        <input class="form-input" id="admin-pass" type="password" placeholder="Choose a strong password" required minlength="6">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Confirm Password</label>
+        <input class="form-input" id="admin-pass2" type="password" placeholder="Repeat password" required>
+      </div>
+      <button class="btn btn-primary btn-full btn-lg" type="submit" id="setup-btn">Create Admin Account</button>
+    </form>
+
+    <div class="alert alert-warning mt-3" style="display:block">
+      ⚠️ <strong>Important:</strong> Run this page only ONCE. After setup, open <a href="index.html">index.html</a> to log in as admin using:<br>
+      Email: <code>admin@tradingsim.app</code>
+    </div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="js/config.js"></script>
+<script>
+function showAlert(msg, type='error') {
+  const b = document.getElementById('alert-box');
+  b.className = `alert alert-${type}`;
+  b.innerHTML = msg;
+  b.classList.remove('hidden');
+}
+
+document.getElementById('setup-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name  = document.getElementById('admin-name').value.trim();
+  const pass  = document.getElementById('admin-pass').value;
+  const pass2 = document.getElementById('admin-pass2').value;
+  const btn   = document.getElementById('setup-btn');
+
+  if (pass !== pass2) { showAlert('Passwords do not match.'); return; }
+  if (pass.length < 6) { showAlert('Password must be at least 6 characters.'); return; }
+
+  btn.disabled = true; btn.textContent = 'Creating…';
+
+  try {
+    const cred = await auth.createUserWithEmailAndPassword('admin@tradingsim.app', pass);
+    const uid  = cred.user.uid;
+
+    const batch = db.batch();
+    batch.set(db.doc(`users/${uid}`), {
+      uid, email: 'admin@tradingsim.app',
+      traderId: 'ADMIN', name,
+      role: 'admin',
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    batch.set(db.doc('config/session'), {
+      status: 'inactive',
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    await batch.commit();
+
+    showAlert(`✅ Admin account created!<br><br>
+      <strong>Login at:</strong> <a href="index.html">index.html</a><br>
+      <strong>Username:</strong> admin<br>
+      <strong>Password:</strong> the one you just set<br><br>
+      You can now <strong>delete this setup.html file</strong>.
+    `, 'success');
+    btn.textContent = 'Done! Go to Login →';
+    btn.onclick = () => window.location.href = 'index.html';
+    btn.disabled = false;
+    btn.type = 'button';
+  } catch(err) {
+    if (err.code === 'auth/email-already-in-use') {
+      showAlert('Admin account already exists. <a href="index.html">Go to Login →</a>', 'warning');
+    } else {
+      showAlert(err.message);
+    }
+    btn.disabled = false;
+    btn.textContent = 'Create Admin Account';
+  }
+});
+</script>
+</body>
+</html>

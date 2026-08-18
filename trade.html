@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TradeSim — Markets</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .trade-layout { display:grid; grid-template-columns:1fr 380px; gap:16px; align-items:start; }
+    .market-filters { display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap; }
+    .filter-btn { padding:5px 12px; border-radius:20px; font-size:12px; font-weight:600; border:1px solid var(--border); background:var(--surface); color:var(--text-muted); cursor:pointer; transition:all 0.15s; }
+    .filter-btn:hover { border-color:var(--blue); color:var(--blue); }
+    .filter-btn.active { background:var(--blue-dim); border-color:var(--blue); color:var(--blue); }
+    .selected-stock { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:16px; margin-bottom:14px; }
+    .stock-big-price { font-size:32px; font-weight:800; font-family:var(--font-mono); }
+    .stock-meta { display:flex; gap:16px; flex-wrap:wrap; margin-top:6px; font-size:12px; color:var(--text-muted); }
+    .ob-depth-bar { background:var(--border); height:3px; border-radius:2px; margin-top:2px; }
+    .ob-depth-fill-bid { background:var(--green); height:100%; border-radius:2px; }
+    .ob-depth-fill-ask { background:var(--red);   height:100%; border-radius:2px; }
+    .price-chart-wrap { height:180px; background:var(--surface); border-radius:var(--radius-sm); margin-bottom:14px; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+    .price-chart-wrap canvas { width:100%; height:100%; }
+    @media(max-width:900px) { .trade-layout { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+<div class="app-shell">
+  <!-- Topbar -->
+  <header class="topbar">
+    <a href="dashboard.html" class="topbar-logo"><div class="topbar-logo-icon">📈</div> TradeSim</a>
+    <div class="topbar-divider"></div>
+    <div class="topbar-title">Markets &amp; Trading</div>
+    <div id="session-badge" class="session-badge inactive"><span class="dot"></span> Inactive</div>
+    <div class="topbar-user">
+      <div class="topbar-avatar" id="user-avatar">?</div>
+      <div><div class="topbar-username" id="user-name">—</div><div class="topbar-traderid" id="user-tid">—</div></div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="auth.signOut().then(()=>location.href='index.html')">Logout</button>
+  </header>
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="nav-section-label">Trading</div>
+    <a class="nav-item" href="dashboard.html"><span class="nav-icon">🏠</span> Dashboard</a>
+    <a class="nav-item active"><span class="nav-icon">📊</span> Markets &amp; Trade</a>
+    <a class="nav-item" href="dashboard.html#bilateral"><span class="nav-icon">🤝</span> Bilateral Orders</a>
+    <div class="nav-section-label">Info</div>
+    <a class="nav-item" href="leaderboard.html"><span class="nav-icon">🏆</span> Leaderboard</a>
+    <a class="nav-item" href="dashboard.html"><span class="nav-icon">📋</span> My Trades</a>
+    <div class="sidebar-logout">
+      <button class="btn btn-ghost btn-full btn-sm" onclick="auth.signOut().then(()=>location.href='index.html')">🚪 Logout</button>
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <main class="main-content">
+    <div id="toast-container"></div>
+    <div id="news-ticker"></div>
+
+    <div class="trade-layout">
+      <!-- LEFT: Securities list -->
+      <div>
+        <div class="page-header" style="margin-bottom:14px">
+          <div><h1 class="page-title">Market Overview</h1><p class="page-subtitle">Click any security to trade</p></div>
+        </div>
+
+        <div class="search-bar">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="search-input" placeholder="Search by symbol or company name…" oninput="filterTable()">
+        </div>
+
+        <div class="market-filters" id="sector-filters">
+          <button class="filter-btn active" onclick="setSector('ALL',this)">All</button>
+        </div>
+
+        <div class="card" style="padding:0">
+          <div class="table-wrap">
+            <table class="data-table clickable" id="market-table">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Company</th>
+                  <th>Sector</th>
+                  <th>Price (₹)</th>
+                  <th>Change</th>
+                  <th>Change %</th>
+                  <th>Volume</th>
+                </tr>
+              </thead>
+              <tbody id="market-tbody">
+                <tr><td colspan="7" class="text-center muted" style="padding:32px"><div class="spinner" style="margin:auto"></div></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Trade panel -->
+      <div id="trade-panel" style="position:sticky;top:16px">
+        <div id="select-prompt" class="card text-center" style="padding:48px">
+          <div style="font-size:40px;margin-bottom:12px">📊</div>
+          <div style="font-weight:600;color:var(--text-dim)">Select a security</div>
+          <div class="muted" style="font-size:12px;margin-top:4px">Click any row in the market table to trade</div>
+        </div>
+
+        <div id="trade-form" class="hidden">
+          <!-- Stock info -->
+          <div class="selected-stock">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start">
+              <div>
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px" id="tf-sector">—</div>
+                <div style="font-family:var(--font-mono);font-weight:800;font-size:18px;color:var(--blue)" id="tf-symbol">—</div>
+                <div style="color:var(--text-muted);font-size:12px" id="tf-name">—</div>
+              </div>
+              <div style="text-align:right">
+                <div class="stock-big-price" id="tf-price">₹0.00</div>
+                <div style="font-size:13px" id="tf-change">—</div>
+              </div>
+            </div>
+            <div class="stock-meta">
+              <span>Volume: <strong id="tf-vol">—</strong></span>
+              <span>My position: <strong id="tf-position">0</strong></span>
+              <span>Cash: <strong id="tf-cash">—</strong></span>
+            </div>
+          </div>
+
+          <!-- Mini price chart -->
+          <div class="price-chart-wrap">
+            <canvas id="price-chart"></canvas>
+          </div>
+
+          <!-- Order Book -->
+          <div style="margin-bottom:14px">
+            <div style="font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px">Order Book</div>
+            <div class="order-book">
+              <div class="ob-side">
+                <div class="ob-header">
+                  <span style="color:var(--green)">BID</span><span>Qty</span><span>Trader</span>
+                </div>
+                <div id="ob-bids"></div>
+              </div>
+              <div class="ob-side">
+                <div class="ob-header">
+                  <span style="color:var(--red)">ASK</span><span>Qty</span><span>Trader</span>
+                </div>
+                <div id="ob-asks"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Place Order -->
+          <div class="card" style="padding:16px">
+            <div class="order-tabs">
+              <button class="order-tab active-buy" id="tab-buy"  onclick="setOrderSide('buy')">BUY</button>
+              <button class="order-tab"            id="tab-sell" onclick="setOrderSide('sell')">SELL</button>
+            </div>
+            <input type="hidden" id="order-side" value="buy">
+
+            <div class="form-group">
+              <label class="form-label">Price (₹) — Limit</label>
+              <input class="form-input mono" id="order-price" type="number" step="0.05" min="0.01" placeholder="Enter limit price">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Quantity (shares)</label>
+              <input class="form-input mono" id="order-qty" type="number" step="1" min="1" placeholder="Number of shares">
+            </div>
+
+            <div id="order-preview" class="alert hidden" style="margin-bottom:12px;font-family:var(--font-mono)"></div>
+
+            <button class="btn btn-full btn-lg" id="order-submit" onclick="submitOrder()">Place Order</button>
+            <div class="muted mt-2" style="font-size:11px;text-align:center" id="order-note">Short selling is allowed — sell shares you don't own</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Firebase + Libraries -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="js/config.js"></script>
+<script src="js/securities.js"></script>
+<script src="js/engine.js"></script>
+<script>
+let ME = null;
+let MY_PORTFOLIO = null;
+let CURRENT_SYM  = null;
+let ALL_PRICES   = {};
+let priceHistory = {}; // sym → [prices]
+let obUnsubscribers = [];
+let chartCtx = null;
+
+// ── Auth guard ───────────────────────────────
+auth.onAuthStateChanged(async (user) => {
+  if (!user) { window.location.href = 'index.html'; return; }
+  const snap = await db.doc(`users/${user.uid}`).get();
+  if (!snap.exists) { window.location.href = 'index.html'; return; }
+  const u = snap.data();
+  if (u.role === 'admin') { window.location.href = 'admin.html'; return; }
+  ME = { uid: user.uid, traderId: u.traderId, name: u.name };
+
+  document.getElementById('user-name').textContent   = u.name;
+  document.getElementById('user-tid').textContent    = u.traderId;
+  document.getElementById('user-avatar').textContent = initials(u.name);
+
+  initMarkets();
+});
+
+// ── Init ─────────────────────────────────────
+function initMarkets() {
+  buildSectorFilters();
+  listenSession();
+  listenPrices();
+  listenPortfolio();
+  listenNewsForTicker();
+
+  // Pre-check URL param
+  const params = new URLSearchParams(location.search);
+  const sym = params.get('sym');
+  if (sym) setTimeout(() => selectSecurity(sym), 1500);
+
+  // Order preview
+  ['order-price','order-qty'].forEach(id => {
+    document.getElementById(id).addEventListener('input', updateOrderPreview);
+  });
+}
+
+function listenSession() {
+  PATHS.session().onSnapshot(snap => {
+    const s = snap.exists ? snap.data().status : 'inactive';
+    const badge = document.getElementById('session-badge');
+    badge.className = `session-badge ${s}`;
+    badge.innerHTML = `<span class="dot"></span> ${s.charAt(0).toUpperCase()+s.slice(1)}`;
+  });
+}
+
+function listenPortfolio() {
+  if (!ME) return;
+  PATHS.portfolio(ME.uid).onSnapshot(snap => {
+    MY_PORTFOLIO = snap.exists ? snap.data() : null;
+    if (CURRENT_SYM) updateStockMeta();
+  });
+}
+
+function listenNewsForTicker() {
+  PATHS.news().orderBy('timestamp','desc').limit(1).onSnapshot(snap => {
+    if (snap.empty) return;
+    const n = snap.docs[0].data();
+    const ticker = document.getElementById('news-ticker');
+    const sign = n.changePercent >= 0 ? '+' : '';
+    const cls  = n.changePercent >= 0 ? 'price-up' : 'price-down';
+    ticker.innerHTML = `<div class="news-banner">📰 <strong>${n.symbol}</strong>: ${n.headline} — Price: <span class="${cls}">${sign}${n.changePercent}%</span></div>`;
+    setTimeout(() => { ticker.innerHTML = ''; }, 30000);
+  });
+}
+
+// ── Sector filters ───────────────────────────
+let ACTIVE_SECTOR = 'ALL';
+function buildSectorFilters() {
+  const sectors = [...new Set(SECURITIES.map(s => s.sector))].sort();
+  const container = document.getElementById('sector-filters');
+  sectors.forEach(sec => {
+    const btn = document.createElement('button');
+    btn.className = 'filter-btn';
+    btn.textContent = sec;
+    btn.onclick = function() { setSector(sec, this); };
+    container.appendChild(btn);
+  });
+}
+function setSector(sec, btn) {
+  ACTIVE_SECTOR = sec;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderTable();
+}
+
+// ── Live prices ──────────────────────────────
+function listenPrices() {
+  PATHS.prices().onSnapshot(snap => {
+    snap.forEach(d => {
+      const prev = ALL_PRICES[d.id];
+      ALL_PRICES[d.id] = d.data();
+      // Track history
+      if (!priceHistory[d.id]) priceHistory[d.id] = [];
+      priceHistory[d.id].push(d.data().price);
+      if (priceHistory[d.id].length > 50) priceHistory[d.id].shift();
+
+      // Flash price change in table
+      if (prev && prev.price !== d.data().price) {
+        const row = document.getElementById('row-' + d.id);
+        if (row) {
+          row.classList.remove('flash-green','flash-red');
+          void row.offsetWidth;
+          row.classList.add(d.data().price > prev.price ? 'flash-green' : 'flash-red');
+        }
+      }
+    });
+    renderTable();
+    if (CURRENT_SYM && ALL_PRICES[CURRENT_SYM]) updateSelectedStockUI();
+  });
+}
+
+// ── Market Table ─────────────────────────────
+let SEARCH_QUERY = '';
+function filterTable() {
+  SEARCH_QUERY = document.getElementById('search-input').value.toLowerCase();
+  renderTable();
+}
+
+function renderTable() {
+  const tbody = document.getElementById('market-tbody');
+  let secs = SECURITIES.filter(s => {
+    if (ACTIVE_SECTOR !== 'ALL' && s.sector !== ACTIVE_SECTOR) return false;
+    if (SEARCH_QUERY && !s.symbol.toLowerCase().includes(SEARCH_QUERY) && !s.name.toLowerCase().includes(SEARCH_QUERY)) return false;
+    return true;
+  });
+
+  tbody.innerHTML = secs.map(s => {
+    const p = ALL_PRICES[s.symbol];
+    const price    = p ? p.price    : s.price;
+    const change   = p ? (p.change   || 0) : 0;
+    const changePct= p ? (p.changePct|| 0) : 0;
+    const volume   = p ? (p.volume   || 0) : 0;
+    const chgCls   = change > 0 ? 'price-up' : change < 0 ? 'price-down' : 'price-flat';
+    const arrow    = change > 0 ? '▲' : change < 0 ? '▼' : '–';
+    const active   = CURRENT_SYM === s.symbol ? 'style="background:var(--blue-dim)"' : '';
+    return `<tr id="row-${s.symbol}" onclick="selectSecurity('${s.symbol}')" ${active}>
+      <td class="symbol-cell">${s.symbol}</td>
+      <td class="name-cell">${s.name}</td>
+      <td><span class="sector-badge">${s.sector}</span></td>
+      <td class="price-cell">${formatINR(price)}</td>
+      <td class="change-cell ${chgCls}">${arrow} ${change>=0?'+':''}${formatINR(change)}</td>
+      <td class="change-cell ${chgCls}">${pct(changePct)}</td>
+      <td class="mono muted">${formatQty(volume)}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Select a security ────────────────────────
+let obUnsubBids = null, obUnsubAsks = null;
+function selectSecurity(sym) {
+  CURRENT_SYM = sym;
+  document.getElementById('select-prompt').classList.add('hidden');
+  document.getElementById('trade-form').classList.remove('hidden');
+
+  // Highlight row
+  document.querySelectorAll('#market-table tbody tr').forEach(r => r.removeAttribute('style'));
+  const row = document.getElementById('row-' + sym);
+  if (row) { row.style.background = 'var(--blue-dim)'; row.scrollIntoView({ block: 'nearest' }); }
+
+  updateStockMeta();
+  updateSelectedStockUI();
+  listenOrderBook(sym);
+  setOrderSide('buy');
+  drawChart(sym);
+}
+
+function updateStockMeta() {
+  if (!CURRENT_SYM) return;
+  const sec = getSecurityBySymbol(CURRENT_SYM);
+  if (!sec) return;
+  document.getElementById('tf-sector').textContent = sec.sector;
+  document.getElementById('tf-symbol').textContent = sec.symbol;
+  document.getElementById('tf-name').textContent   = sec.name;
+  const port = MY_PORTFOLIO || {};
+  const qty  = (port.holdings || {})[CURRENT_SYM] || 0;
+  document.getElementById('tf-position').textContent = (qty < 0 ? 'SHORT ' : '') + formatQty(Math.abs(qty));
+  document.getElementById('tf-position').style.color = qty < 0 ? 'var(--orange)' : qty > 0 ? 'var(--green)' : 'var(--text-dim)';
+  document.getElementById('tf-cash').textContent = formatINR(port.cash || 0);
+}
+
+function updateSelectedStockUI() {
+  const p = ALL_PRICES[CURRENT_SYM];
+  if (!p) return;
+  const chgCls = (p.change || 0) > 0 ? 'price-up' : (p.change || 0) < 0 ? 'price-down' : 'price-flat';
+  const arrow  = (p.change||0) > 0 ? '▲' : (p.change||0) < 0 ? '▼' : '–';
+  document.getElementById('tf-price').textContent = formatINR(p.price);
+  document.getElementById('tf-price').className   = 'stock-big-price ' + chgCls;
+  document.getElementById('tf-change').innerHTML  = `<span class="${chgCls}">${arrow} ${formatINR(Math.abs(p.change||0))} (${pct(p.changePct||0)})</span>`;
+  document.getElementById('tf-vol').textContent   = formatQty(p.volume || 0);
+  updateStockMeta();
+  drawChart(CURRENT_SYM);
+}
+
+// ── Order book listener ───────────────────────
+function listenOrderBook(sym) {
+  if (obUnsubBids) obUnsubBids();
+  if (obUnsubAsks) obUnsubAsks();
+
+  obUnsubBids = PATHS.bids(sym).onSnapshot(renderBids);
+  obUnsubAsks = PATHS.asks(sym).onSnapshot(renderAsks);
+}
+
+function renderBids(snap) {
+  const bids = snap.docs.map(d => d.data()).sort((a,b) => b.price - a.price).slice(0, 8);
+  const maxQ  = Math.max(...bids.map(b => b.remainingQty), 1);
+  document.getElementById('ob-bids').innerHTML = bids.length === 0
+    ? '<div class="muted" style="font-size:11px;padding:8px">No bids</div>'
+    : bids.map(b => {
+        const w = Math.round((b.remainingQty / maxQ) * 100);
+        return `<div class="ob-row ob-bid">
+          <span class="ob-price-bid">${formatINR(b.price)}</span>
+          <span class="ob-qty">${formatQty(b.remainingQty)}</span>
+          <span class="ob-who">${b.traderId}</span>
+        </div><div class="ob-depth-bar"><div class="ob-depth-fill-bid" style="width:${w}%"></div></div>`;
+      }).join('');
+}
+
+function renderAsks(snap) {
+  const asks = snap.docs.map(d => d.data()).sort((a,b) => a.price - b.price).slice(0, 8);
+  const maxQ  = Math.max(...asks.map(a => a.remainingQty), 1);
+  document.getElementById('ob-asks').innerHTML = asks.length === 0
+    ? '<div class="muted" style="font-size:11px;padding:8px">No asks</div>'
+    : asks.map(a => {
+        const w = Math.round((a.remainingQty / maxQ) * 100);
+        return `<div class="ob-row ob-ask">
+          <span class="ob-price-ask">${formatINR(a.price)}</span>
+          <span class="ob-qty">${formatQty(a.remainingQty)}</span>
+          <span class="ob-who">${a.traderId}</span>
+        </div><div class="ob-depth-bar"><div class="ob-depth-fill-ask" style="width:${w}%"></div></div>`;
+      }).join('');
+}
+
+// ── Mini Price Chart ─────────────────────────
+function drawChart(sym) {
+  const canvas = document.getElementById('price-chart');
+  if (!canvas) return;
+  const history = priceHistory[sym] || [];
+  if (history.length < 2) {
+    const ctx = canvas.getContext('2d');
+    canvas.width  = canvas.offsetWidth  || 340;
+    canvas.height = canvas.offsetHeight || 180;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'rgba(94,116,153,0.4)';
+    ctx.font = '12px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Chart builds as prices update…', canvas.width/2, canvas.height/2);
+    return;
+  }
+
+  canvas.width  = canvas.offsetWidth  || 340;
+  canvas.height = canvas.offsetHeight || 180;
+  const ctx   = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const pad = { t: 10, r: 10, b: 20, l: 52 };
+
+  const min = Math.min(...history) * 0.999;
+  const max = Math.max(...history) * 1.001;
+  const xScale = (W - pad.l - pad.r) / Math.max(history.length - 1, 1);
+  const yScale = (H - pad.t - pad.b) / (max - min || 1);
+  const toX = i  => pad.l + i * xScale;
+  const toY = v  => H - pad.b - (v - min) * yScale;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Grid lines
+  ctx.strokeStyle = 'rgba(45,58,95,0.6)';
+  ctx.lineWidth   = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.t + i * (H - pad.t - pad.b) / 4;
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+    const val = max - (i / 4) * (max - min);
+    ctx.fillStyle = 'rgba(94,116,153,0.8)';
+    ctx.font = '9px JetBrains Mono, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(formatINR(val), pad.l - 4, y + 3);
+  }
+
+  // Line gradient fill
+  const grad = ctx.createLinearGradient(0, pad.t, 0, H - pad.b);
+  const isUp = history[history.length-1] >= history[0];
+  grad.addColorStop(0, isUp ? 'rgba(0,212,170,0.25)' : 'rgba(255,71,87,0.25)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+
+  ctx.beginPath();
+  history.forEach((v, i) => {
+    i === 0 ? ctx.moveTo(toX(i), toY(v)) : ctx.lineTo(toX(i), toY(v));
+  });
+  ctx.lineTo(toX(history.length-1), H - pad.b);
+  ctx.lineTo(toX(0), H - pad.b);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Line
+  ctx.beginPath();
+  history.forEach((v, i) => {
+    i === 0 ? ctx.moveTo(toX(i), toY(v)) : ctx.lineTo(toX(i), toY(v));
+  });
+  ctx.strokeStyle = isUp ? '#00d4aa' : '#ff4757';
+  ctx.lineWidth   = 2;
+  ctx.lineJoin    = 'round';
+  ctx.stroke();
+
+  // Last price dot
+  const last = history[history.length - 1];
+  ctx.beginPath();
+  ctx.arc(toX(history.length-1), toY(last), 4, 0, Math.PI * 2);
+  ctx.fillStyle = isUp ? '#00d4aa' : '#ff4757';
+  ctx.fill();
+}
+
+// ── Order form ───────────────────────────────
+function setOrderSide(side) {
+  document.getElementById('order-side').value = side;
+  const buyTab  = document.getElementById('tab-buy');
+  const sellTab = document.getElementById('tab-sell');
+  const btn     = document.getElementById('order-submit');
+  if (side === 'buy') {
+    buyTab.className  = 'order-tab active-buy';
+    sellTab.className = 'order-tab';
+    btn.className     = 'btn btn-success btn-full btn-lg';
+    btn.textContent   = `BUY ${CURRENT_SYM||''}`;
+  } else {
+    buyTab.className  = 'order-tab';
+    sellTab.className = 'order-tab active-sell';
+    btn.className     = 'btn btn-danger btn-full btn-lg';
+    btn.textContent   = `SELL ${CURRENT_SYM||''}`;
+  }
+  updateOrderPreview();
+}
+
+function updateOrderPreview() {
+  const price = parseFloat(document.getElementById('order-price').value);
+  const qty   = parseInt(document.getElementById('order-qty').value);
+  const side  = document.getElementById('order-side').value;
+  const box   = document.getElementById('order-preview');
+  if (price > 0 && qty > 0) {
+    const total = price * qty;
+    box.className = `alert ${side==='buy' ? 'alert-success' : 'alert-error'}`;
+    box.textContent = `${side.toUpperCase()} ${formatQty(qty)} shares × ${formatINR(price)} = ${formatINR(total)}`;
+    box.classList.remove('hidden');
+  } else { box.classList.add('hidden'); }
+}
+
+async function submitOrder() {
+  if (!CURRENT_SYM || !ME) return;
+  const btn   = document.getElementById('order-submit');
+  const side  = document.getElementById('order-side').value;
+  const price = document.getElementById('order-price').value;
+  const qty   = document.getElementById('order-qty').value;
+
+  btn.disabled = true;
+  btn.textContent = 'Placing…';
+
+  try {
+    await placeLimitOrder(ME.uid, ME.traderId, ME.name, CURRENT_SYM, side, price, qty);
+    showToast('Order placed!', `${side.toUpperCase()} ${formatQty(qty)} ${CURRENT_SYM} @ ${formatINR(parseFloat(price))}`, 'success');
+    document.getElementById('order-price').value = '';
+    document.getElementById('order-qty').value   = '';
+    document.getElementById('order-preview').classList.add('hidden');
+  } catch (e) {
+    showToast('Order failed', e.message, 'error');
+  }
+
+  setOrderSide(side);
+  btn.disabled = false;
+}
+</script>
+</body>
+</html>

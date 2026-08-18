@@ -1,0 +1,5 @@
+# Netlify configuration for TradeSim
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
