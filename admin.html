@@ -534,11 +534,28 @@ async function loadParticipants() {
         <div class="p-name">${u.name}</div>
         <div class="p-id">${u.traderId}</div>
         <div class="p-cash">${(u.traderId || '').toLowerCase()}@tradingsim.app</div>
+        <button class="btn btn-danger btn-sm btn-full" style="margin-top:8px;font-size:11px" onclick="deleteParticipant('${d.id}','${u.name}','${u.traderId}')">🗑 Delete</button>
       </div>`;
     }).join('');
   } catch (e) {
     grid.innerHTML = `<div class="alert alert-error">Error loading participants: ${e.message}</div>`;
     console.error('loadParticipants error:', e);
+  }
+}
+
+// ── Delete a participant ─────────────────────
+async function deleteParticipant(uid, name, traderId) {
+  if (!confirm(`Delete "${name}" (${traderId})? This removes all their data. Cannot be undone.`)) return;
+  try {
+    const batch = db.batch();
+    batch.delete(db.doc(`users/${uid}`));
+    batch.delete(db.doc(`portfolios/${uid}`));
+    batch.delete(db.doc(`leaderboard/${uid}`));
+    await batch.commit();
+    showToast('Account deleted', `${name} (${traderId}) removed`, 'success');
+    loadParticipants();
+  } catch (e) {
+    showToast('Error deleting', e.message, 'error');
   }
 }
 
