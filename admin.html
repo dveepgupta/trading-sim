@@ -149,6 +149,7 @@
             <input class="form-input" id="bulk-password" type="text" value="Trade@123" placeholder="Same password for all">
           </div>
           <button class="btn btn-primary btn-full" onclick="bulkCreate()">👥 Create All Accounts</button>
+          <button class="btn btn-danger btn-full mt-2" onclick="deleteAllAccounts()" style="opacity:0.8">🗑 Delete ALL Participant Accounts</button>
           <div class="progress-bar mt-3 hidden" id="create-progress-wrap">
             <div class="progress-fill" id="create-progress" style="width:0%"></div>
           </div>
@@ -437,14 +438,14 @@ async function bulkCreate() {
       created++;
     } catch (e) {
       const msg = e.message || '';
-      if (msg.includes('EMAIL_EXISTS') || msg.includes('email-already-in-use') || e.code === 'auth/email-already-in-use') {
-        created++; // already exists, count as success
-      } else {
-        failed++;
-        console.warn(traderId, e);
-        // Show last error in UI so we can debug
-        statusEl.textContent = `Progress: ${i}/${count} — Created: ${created}, Failed: ${failed} ⚠️ Last error: ${msg}`;
+      if (msg.includes('RATE_LIMITED')) {
+        showToast('Rate Limited!', 'Firebase is blocking rapid creation. Wait 15 min and try again.', 'error');
+        statusEl.textContent = `Stopped at ${i}/${count} — Rate limited by Firebase. Wait 15 minutes.`;
+        break;
       }
+      failed++;
+      console.warn(traderId, e);
+      statusEl.textContent = `Progress: ${i}/${count} — Created: ${created}, Failed: ${failed} ⚠️ ${msg.substring(0,80)}`;
     }
     progressBar.style.width = ((i / count) * 100) + '%';
     if (failed === 0) statusEl.textContent = `Progress: ${i}/${count} — Created: ${created}, Failed: ${failed}`;
@@ -481,19 +482,39 @@ async function createSingle() {
 
 // Uses Firebase REST API to create user without signing out admin
 async function createParticipantAccount(traderId, name, email, password, cash) {
-  // Create user via Firebase Auth REST (avoids signing out admin)
   const apiKey = 'AIzaSyBGpCLrRPyQbo5goUGt7oada3EVJnz4H6Y';
+  let uid = null;
+
+  // Step 1: Try to create new user
   const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password, returnSecureToken: true })
   });
   const data = await res.json();
-  if (data.error) throw Object.assign(new Error(data.error.message), { code: 'auth/' + data.error.message.toLowerCase().replace(/ /g,'-') });
 
-  const uid = data.localId;
+  if (data.error) {
+    const errMsg = data.error.message || '';
+    if (errMsg.includes('EMAIL_EXISTS')) {
+      // Step 2: Account already in Firebase Auth → sign in to get UID
+      const res2 = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, returnSecureToken: true })
+      });
+      const data2 = await res2.json();
+      if (data2.error) throw new Error('Account exists but password mismatch: ' + data2.error.message);
+      uid = data2.localId;
+    } else if (errMsg.includes('TOO_MANY_ATTEMPTS')) {
+      throw new Error('RATE_LIMITED: Firebase is rate-limiting. Please wait 15 minutes and try again.');
+    } else {
+      throw new Error(errMsg);
+    }
+  } else {
+    uid = data.localId;
+  }
 
-  // Save user profile + portfolio to Firestore (use admin SDK via db)
+  // Step 3: (Re-)create Firestore documents
   const batch = db.batch();
   batch.set(db.doc(`users/${uid}`), {
     uid, email, traderId, name,
@@ -541,6 +562,31 @@ async function loadParticipants() {
     grid.innerHTML = `<div class="alert alert-error">Error loading participants: ${e.message}</div>`;
     console.error('loadParticipants error:', e);
   }
+}
+
+// ── Delete ALL participants ──────────────────
+async function deleteAllAccounts() {
+  if (!confirm('Delete ALL participant accounts? This removes all portfolio data. Cannot be undone!')) return;
+  if (!confirm('Are you absolutely sure? This deletes ALL 60 participants.')) return;
+  try {
+    const snap = await PATHS.users().where('role', '==', 'participant').get();
+    if (snap.empty) { showToast('No accounts to delete', '', 'info'); return; }
+    showToast('Deleting...', `Removing ${snap.size} accounts`, 'info');
+    // Delete in batches of 20 (Firestore batch limit is 500 ops)
+    const chunks = [];
+    for (let i = 0; i < snap.docs.length; i += 20) chunks.push(snap.docs.slice(i, i + 20));
+    for (const chunk of chunks) {
+      const batch = db.batch();
+      chunk.forEach(d => {
+        batch.delete(db.doc(`users/${d.id}`));
+        batch.delete(db.doc(`portfolios/${d.id}`));
+        batch.delete(db.doc(`leaderboard/${d.id}`));
+      });
+      await batch.commit();
+    }
+    showToast('All accounts deleted!', `${snap.size} participants removed from app`, 'success');
+    loadParticipants();
+  } catch (e) { showToast('Error', e.message, 'error'); }
 }
 
 // ── Delete a participant ─────────────────────
