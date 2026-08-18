@@ -436,12 +436,19 @@ async function bulkCreate() {
       await createParticipantAccount(traderId, name, email, password, cash);
       created++;
     } catch (e) {
-      if (e.code === 'auth/email-already-in-use') { created++; }
-      else { failed++; console.warn(traderId, e.message); }
+      const msg = e.message || '';
+      if (msg.includes('EMAIL_EXISTS') || msg.includes('email-already-in-use') || e.code === 'auth/email-already-in-use') {
+        created++; // already exists, count as success
+      } else {
+        failed++;
+        console.warn(traderId, e);
+        // Show last error in UI so we can debug
+        statusEl.textContent = `Progress: ${i}/${count} — Created: ${created}, Failed: ${failed} ⚠️ Last error: ${msg}`;
+      }
     }
     progressBar.style.width = ((i / count) * 100) + '%';
-    statusEl.textContent = `Progress: ${i}/${count} — Created: ${created}, Failed: ${failed}`;
-    await new Promise(r => setTimeout(r, 300)); // rate limit
+    if (failed === 0) statusEl.textContent = `Progress: ${i}/${count} — Created: ${created}, Failed: ${failed}`;
+    await new Promise(r => setTimeout(r, 600)); // increased delay to avoid rate limits
   }
 
   showToast('Done!', `${created} accounts ready, ${failed} failed`, created > 0 ? 'success' : 'error');
@@ -512,19 +519,27 @@ async function createParticipantAccount(traderId, name, email, password, cash) {
 async function loadParticipants() {
   const grid = document.getElementById('participants-grid');
   grid.innerHTML = '<div class="loading"><div class="spinner"></div> Loading…</div>';
-  const snap = await PATHS.users().where('role', '==', 'participant').orderBy('traderId').get();
-  if (snap.empty) {
-    grid.innerHTML = '<div class="empty-state"><div class="empty-title">No participants yet</div><div class="empty-sub">Use Bulk Create above</div></div>';
-    return;
+  try {
+    // No orderBy to avoid composite index requirement
+    const snap = await PATHS.users().where('role', '==', 'participant').get();
+    if (snap.empty) {
+      grid.innerHTML = '<div class="empty-state"><div class="empty-title">No participants yet</div><div class="empty-sub">Use Bulk Create above</div></div>';
+      return;
+    }
+    // Sort client-side
+    const docs = snap.docs.sort((a, b) => (a.data().traderId || '').localeCompare(b.data().traderId || ''));
+    grid.innerHTML = docs.map(d => {
+      const u = d.data();
+      return `<div class="participant-card">
+        <div class="p-name">${u.name}</div>
+        <div class="p-id">${u.traderId}</div>
+        <div class="p-cash">${(u.traderId || '').toLowerCase()}@tradingsim.app</div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    grid.innerHTML = `<div class="alert alert-error">Error loading participants: ${e.message}</div>`;
+    console.error('loadParticipants error:', e);
   }
-  grid.innerHTML = snap.docs.map(d => {
-    const u = d.data();
-    return `<div class="participant-card">
-      <div class="p-name">${u.name}</div>
-      <div class="p-id">${u.traderId}</div>
-      <div class="p-cash">${u.traderId.toLowerCase()}@tradingsim.app</div>
-    </div>`;
-  }).join('');
 }
 
 // ── Monitor ──────────────────────────────────
