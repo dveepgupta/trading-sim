@@ -353,16 +353,48 @@ function confirmEnd() {
   if (confirm('End the trading session? Participants will no longer be able to trade.')) setSession('ended');
 }
 
+
 async function confirmReset() {
-  if (!confirm('⚠️ Full reset: This will clear ALL orders, prices, and reset all portfolios. Are you sure?')) return;
-  if (!confirm('This cannot be undone. Confirm reset?')) return;
+  if (!confirm('⚠️ Full reset: This will clear ALL trades, proposals, order book, and re-initialize prices. Are you sure?')) return;
+  if (!confirm('This cannot be undone. Confirm full reset?')) return;
   try {
-    showToast('Resetting…', 'This may take a moment', 'info');
+    showToast('Resetting…', 'Clearing all data, please wait…', 'info');
+
+    // 1. Mark session inactive first
     await PATHS.session().set({ status: 'inactive', updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+
+    // 2. Delete trades
+    await deleteCollection(PATHS.trades());
+
+    // 3. Delete bilateral proposals
+    await deleteCollection(PATHS.bilateral());
+
+    // 4. Delete order book (bids + asks for every security)
+    for (const sec of SECURITIES) {
+      await deleteCollection(PATHS.bids(sec.symbol));
+      await deleteCollection(PATHS.asks(sec.symbol));
+    }
+
+    // 5. Re-initialize security prices
     await initializePrices();
-    showToast('Reset complete', 'Prices re-initialized', 'success');
-  } catch (e) { showToast('Error', e.message, 'error'); }
+
+    showToast('Reset complete ✓', 'Trades, proposals, order book cleared. Prices re-initialized.', 'success');
+  } catch (e) { showToast('Error during reset', e.message, 'error'); }
 }
+
+// Helper: delete all documents in a collection reference in batches of 400
+async function deleteCollection(colRef) {
+  const snap = await colRef.get();
+  if (snap.empty) return;
+  const chunks = [];
+  for (let i = 0; i < snap.docs.length; i += 400) chunks.push(snap.docs.slice(i, i + 400));
+  for (const chunk of chunks) {
+    const batch = db.batch();
+    chunk.forEach(d => batch.delete(d.ref));
+    await batch.commit();
+  }
+}
+
 
 function listenTradeCounts() {
   PATHS.trades().onSnapshot(snap => {
