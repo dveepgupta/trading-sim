@@ -445,54 +445,67 @@ async function submitBilateral() {
 }
 
 function loadBilateral() {
-  // Incoming — orders where toUid = ME.uid and status = pending
-  PATHS.bilateral().where('toUid','==',ME.uid).where('status','==','pending')
-    .orderBy('timestamp','desc').onSnapshot(snap => {
-      const div = document.getElementById('bi-incoming');
-      const badge = document.getElementById('bilateral-badge');
-      badge.textContent = snap.size;
-      badge.classList.toggle('hidden', snap.size === 0);
+  // Incoming — simple single-field query, filter/sort client-side (avoids composite index requirement)
+  PATHS.bilateral().where('toUid','==',ME.uid).onSnapshot(snap => {
+    const div   = document.getElementById('bi-incoming');
+    const badge = document.getElementById('bilateral-badge');
 
-      if (snap.empty) { div.innerHTML = '<div class="empty-state"><div class="empty-icon">📥</div><div class="empty-title">No incoming proposals</div></div>'; return; }
-      div.innerHTML = snap.docs.map(d => {
-        const o = d.data();
-        const side = o.side === 'buy' ? `<span class="price-up">BUY</span>` : `<span class="price-down">SELL</span>`;
-        // from their perspective: they want to BUY → you are SELLING to them
-        const yourRole = o.side === 'buy' ? '(you SELL)' : '(you BUY)';
-        return `<div class="bilateral-card incoming">
-          <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-            <strong>${o.fromName} <span class="muted">${o.fromTraderId}</span></strong>
-            <span class="muted" style="font-size:11px">${timeSince(o.timestamp)}</span>
-          </div>
-          <div style="font-size:13px;margin-bottom:6px">
-            Wants to ${side} <strong>${formatQty(o.quantity)} ${o.symbol}</strong> @ <strong>${formatINR(o.price)}</strong> ${yourRole}
-          </div>
-          <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Total: ${formatINR(o.price*o.quantity)}${o.message ? ' — "'+o.message+'"' : ''}</div>
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-success btn-sm" onclick="handleBilateral('${d.id}','accept',this)">✓ Accept</button>
-            <button class="btn btn-danger  btn-sm" onclick="handleBilateral('${d.id}','reject',this)">✗ Reject</button>
-          </div>
-        </div>`;
-      }).join('');
-    });
+    // Filter pending and sort newest first client-side
+    const pending = snap.docs
+      .filter(d => d.data().status === 'pending')
+      .sort((a, b) => (b.data().timestamp?.toMillis?.() || 0) - (a.data().timestamp?.toMillis?.() || 0));
 
-  // Outgoing
-  PATHS.bilateral().where('fromUid','==',ME.uid)
-    .orderBy('timestamp','desc').limit(20).onSnapshot(snap => {
-      const div = document.getElementById('bi-outgoing');
-      if (snap.empty) { div.innerHTML = '<div class="empty-state"><div class="empty-icon">📤</div><div class="empty-title">No sent proposals</div></div>'; return; }
-      div.innerHTML = snap.docs.map(d => {
-        const o = d.data();
-        const statusCls = { pending:'alert-info', accepted:'alert-success', rejected:'alert-error' }[o.status] || 'alert-info';
-        const statusIcon = { pending:'⏳', accepted:'✅', rejected:'❌' }[o.status] || '⏳';
-        return `<div class="bilateral-card outgoing" style="margin-bottom:8px">
-          <div style="display:flex;justify-content:space-between">
-            <span>To <strong>${o.toName}</strong> — ${o.side.toUpperCase()} ${formatQty(o.quantity)} ${o.symbol} @ ${formatINR(o.price)}</span>
-            <span>${statusIcon} ${o.status}</span>
-          </div>
-        </div>`;
-      }).join('');
-    });
+    badge.textContent = pending.length;
+    badge.classList.toggle('hidden', pending.length === 0);
+
+    if (pending.length === 0) {
+      div.innerHTML = '<div class="empty-state"><div class="empty-icon">📥</div><div class="empty-title">No incoming proposals</div></div>';
+      return;
+    }
+    div.innerHTML = pending.map(d => {
+      const o = d.data();
+      const side     = o.side === 'buy' ? `<span class="price-up">BUY</span>` : `<span class="price-down">SELL</span>`;
+      const yourRole = o.side === 'buy' ? '(you SELL)' : '(you BUY)';
+      return `<div class="bilateral-card incoming">
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+          <strong>${o.fromName} <span class="muted">${o.fromTraderId}</span></strong>
+          <span class="muted" style="font-size:11px">${timeSince(o.timestamp)}</span>
+        </div>
+        <div style="font-size:13px;margin-bottom:6px">
+          Wants to ${side} <strong>${formatQty(o.quantity)} ${o.symbol}</strong> @ <strong>${formatINR(o.price)}</strong> ${yourRole}
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Total: ${formatINR(o.price*o.quantity)}${o.message ? ' — "'+o.message+'"' : ''}</div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-success btn-sm" onclick="handleBilateral('${d.id}','accept',this)">✓ Accept</button>
+          <button class="btn btn-danger  btn-sm" onclick="handleBilateral('${d.id}','reject',this)">✗ Reject</button>
+        </div>
+      </div>`;
+    }).join('');
+  });
+
+  // Outgoing — single-field query, sort client-side
+  PATHS.bilateral().where('fromUid','==',ME.uid).onSnapshot(snap => {
+    const div = document.getElementById('bi-outgoing');
+
+    const sorted = snap.docs
+      .sort((a, b) => (b.data().timestamp?.toMillis?.() || 0) - (a.data().timestamp?.toMillis?.() || 0))
+      .slice(0, 20);
+
+    if (sorted.length === 0) {
+      div.innerHTML = '<div class="empty-state"><div class="empty-icon">📤</div><div class="empty-title">No sent proposals</div></div>';
+      return;
+    }
+    div.innerHTML = sorted.map(d => {
+      const o = d.data();
+      const statusIcon = { pending:'⏳', accepted:'✅', rejected:'❌' }[o.status] || '⏳';
+      return `<div class="bilateral-card outgoing" style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between">
+          <span>To <strong>${o.toName}</strong> — ${o.side.toUpperCase()} ${formatQty(o.quantity)} ${o.symbol} @ ${formatINR(o.price)}</span>
+          <span>${statusIcon} ${o.status}</span>
+        </div>
+      </div>`;
+    }).join('');
+  });
 }
 
 async function handleBilateral(id, action, btn) {
