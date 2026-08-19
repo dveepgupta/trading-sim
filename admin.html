@@ -355,7 +355,7 @@ function confirmEnd() {
 
 
 async function confirmReset() {
-  if (!confirm('⚠️ Full reset: This will clear ALL trades, proposals, order book, and re-initialize prices. Are you sure?')) return;
+  if (!confirm('⚠️ Full reset: This will clear ALL trades, proposals, order book, reset all portfolios, and re-initialize prices. Are you sure?')) return;
   if (!confirm('This cannot be undone. Confirm full reset?')) return;
   try {
     showToast('Resetting…', 'Clearing all data, please wait…', 'info');
@@ -378,10 +378,43 @@ async function confirmReset() {
       await deleteCollection(PATHS.asks(sec.symbol));
     }
 
-    // 6. Re-initialize security prices
+    // 6. Reset all portfolios → cash back to startingCash, holdings cleared
+    const portfoliosSnap = await db.collection('portfolios').get();
+    if (!portfoliosSnap.empty) {
+      const chunks = [];
+      for (let i = 0; i < portfoliosSnap.docs.length; i += 400) chunks.push(portfoliosSnap.docs.slice(i, i + 400));
+      for (const chunk of chunks) {
+        const batch = db.batch();
+        chunk.forEach(d => {
+          const sc = d.data().startingCash || 1000000;
+          batch.update(d.ref, { cash: sc, holdings: {} });
+        });
+        await batch.commit();
+      }
+    }
+
+    // 7. Reset all leaderboard entries → pnl=0, stockValue=0, totalValue=startingCash
+    const lbSnap = await PATHS.leaderboard().get();
+    if (!lbSnap.empty) {
+      const chunks = [];
+      for (let i = 0; i < lbSnap.docs.length; i += 400) chunks.push(lbSnap.docs.slice(i, i + 400));
+      for (const chunk of chunks) {
+        const batch = db.batch();
+        chunk.forEach(d => {
+          const sc = d.data().startingCash || 1000000;
+          batch.update(d.ref, {
+            cash: sc, stockValue: 0, totalValue: sc, pnl: 0,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+        });
+        await batch.commit();
+      }
+    }
+
+    // 8. Re-initialize security prices
     await initializePrices();
 
-    showToast('Reset complete ✓', 'Trades, proposals, order book cleared. Prices re-initialized.', 'success');
+    showToast('Reset complete ✓', 'Portfolios, trades, proposals, order book all cleared. Fresh start!', 'success');
   } catch (e) { showToast('Error during reset', e.message, 'error'); }
 }
 
