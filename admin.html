@@ -230,6 +230,7 @@
     <section id="trades-section" class="hidden">
       <div class="page-header">
         <div><h1 class="page-title">All Trades</h1><p class="page-subtitle">Complete trade log for this session</p></div>
+        <button class="btn btn-danger btn-sm" onclick="deleteAllTrades()">🗑 Delete All Trades</button>
       </div>
       <div class="card">
         <div class="table-wrap">
@@ -661,6 +662,26 @@ PATHS.leaderboard().orderBy('totalValue','desc').onSnapshot(snap => {
     </div>`;
   }).join('');
 });
+
+// ── Delete All Trades ───────────────────────
+async function deleteAllTrades() {
+  if (!confirm('Delete ALL trade records? This cannot be undone!')) return;
+  if (!confirm('Are you absolutely sure? All trade history will be permanently removed.')) return;
+  try {
+    showToast('Deleting trades…', 'Please wait', 'info');
+    const snap = await PATHS.trades().get();
+    if (snap.empty) { showToast('No trades to delete', '', 'info'); return; }
+    // Firestore batch limit is 500 writes; chunk into groups of 400
+    const chunks = [];
+    for (let i = 0; i < snap.docs.length; i += 400) chunks.push(snap.docs.slice(i, i + 400));
+    for (const chunk of chunks) {
+      const batch = db.batch();
+      chunk.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+    }
+    showToast('All trades deleted!', `${snap.size} records removed`, 'success');
+  } catch (e) { showToast('Error', e.message, 'error'); }
+}
 
 // ── All Trades ───────────────────────────────
 PATHS.trades().orderBy('timestamp','desc').limit(200).onSnapshot(snap => {
