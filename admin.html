@@ -369,13 +369,16 @@ async function confirmReset() {
     // 3. Delete bilateral proposals
     await deleteCollection(PATHS.bilateral());
 
-    // 4. Delete order book (bids + asks for every security)
+    // 4. Delete news events
+    await deleteCollection(PATHS.news());
+
+    // 5. Delete order book (bids + asks for every security)
     for (const sec of SECURITIES) {
       await deleteCollection(PATHS.bids(sec.symbol));
       await deleteCollection(PATHS.asks(sec.symbol));
     }
 
-    // 5. Re-initialize security prices
+    // 6. Re-initialize security prices
     await initializePrices();
 
     showToast('Reset complete ✓', 'Trades, proposals, order book cleared. Prices re-initialized.', 'success');
@@ -643,42 +646,59 @@ async function refreshMonitor() {
   const tbody = document.getElementById('monitor-tbody');
   tbody.innerHTML = '<tr><td colspan="7" class="text-center muted" style="padding:24px"><div class="spinner" style="margin:auto"></div></td></tr>';
 
-  const [usersSnap, lbSnap] = await Promise.all([
-    PATHS.users().where('role','==','participant').orderBy('traderId').get(),
-    PATHS.leaderboard().get()
-  ]);
+  try {
+    const [usersSnap, lbSnap] = await Promise.all([
+      PATHS.users().where('role','==','participant').get(), // no orderBy — sort client-side
+      PATHS.leaderboard().get()
+    ]);
 
-  const lbMap = {};
-  lbSnap.forEach(d => { lbMap[d.id] = d.data(); });
+    const lbMap = {};
+    lbSnap.forEach(d => { lbMap[d.id] = d.data(); });
 
-  tbody.innerHTML = usersSnap.docs.map(d => {
-    const u  = d.data();
-    const lb = lbMap[d.id] || {};
-    const tv = lb.totalValue || 0;
-    const sc = lb.startingCash || tv;
-    const pnl = tv - sc;
-    const pnlPct = sc > 0 ? (pnl / sc * 100) : 0;
-    const cls = pnl >= 0 ? 'price-up' : 'price-down';
-    return `<tr>
-      <td class="mono" style="color:var(--blue)">${u.traderId}</td>
-      <td>${u.name}</td>
-      <td class="mono">${formatINR(lb.cash)}</td>
-      <td class="mono">${formatINR(lb.stockValue)}</td>
-      <td class="mono bold">${formatINR(tv)}</td>
-      <td class="mono ${cls}">${pnl >= 0 ? '+' : ''}${formatINR(pnl)}</td>
-      <td class="mono ${cls}">${pnl >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%</td>
-    </tr>`;
-  }).join('') || '<tr><td colspan="7" class="text-center muted" style="padding:24px">No participants</td></tr>';
+    // Sort by traderId client-side
+    const sorted = usersSnap.docs.sort((a, b) =>
+      (a.data().traderId || '').localeCompare(b.data().traderId || '')
+    );
+
+    if (sorted.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center muted" style="padding:24px">No participants</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = sorted.map(d => {
+      const u  = d.data();
+      const lb = lbMap[d.id] || {};
+      const tv = lb.totalValue || 0;
+      const sc = lb.startingCash || tv;
+      const pnl = tv - sc;
+      const pnlPct = sc > 0 ? (pnl / sc * 100) : 0;
+      const cls = pnl >= 0 ? 'price-up' : 'price-down';
+      return `<tr>
+        <td class="mono" style="color:var(--blue)">${u.traderId}</td>
+        <td>${u.name}</td>
+        <td class="mono">${formatINR(lb.cash)}</td>
+        <td class="mono">${formatINR(lb.stockValue)}</td>
+        <td class="mono bold">${formatINR(tv)}</td>
+        <td class="mono ${cls}">${pnl >= 0 ? '+' : ''}${formatINR(pnl)}</td>
+        <td class="mono ${cls}">${pnl >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center muted" style="padding:24px">Error: ${e.message}</td></tr>`;
+    console.error('refreshMonitor error:', e);
+  }
 }
 
 // ── Leaderboard ──────────────────────────────
-PATHS.leaderboard().orderBy('totalValue','desc').onSnapshot(snap => {
+PATHS.leaderboard().onSnapshot(snap => {  // no orderBy — sort client-side
   const list = document.getElementById('lb-list');
   if (!list) return;
   if (snap.empty) { list.innerHTML = '<div class="empty-state"><div class="empty-icon">🏆</div><div class="empty-title">No data yet</div></div>'; return; }
   const medals = ['🥇','🥈','🥉'];
   const classes= ['gold','silver','bronze'];
-  list.innerHTML = snap.docs.map((d,i) => {
+  // Sort by totalValue descending client-side
+  const sorted = snap.docs.sort((a, b) => (b.data().totalValue || 0) - (a.data().totalValue || 0));
+  list.innerHTML = sorted.map((d,i) => {
     const lb = d.data();
     const pnl = lb.pnl || 0;
     const pnlPct = lb.startingCash > 0 ? (pnl / lb.startingCash * 100) : 0;
@@ -716,11 +736,15 @@ async function deleteAllTrades() {
 }
 
 // ── All Trades ───────────────────────────────
-PATHS.trades().orderBy('timestamp','desc').limit(200).onSnapshot(snap => {
+PATHS.trades().onSnapshot(snap => {  // no orderBy — sort client-side to avoid composite index
   const tbody = document.getElementById('trades-tbody');
   if (!tbody) return;
   if (snap.empty) { tbody.innerHTML = '<tr><td colspan="9" class="text-center muted" style="padding:32px">No trades yet</td></tr>'; return; }
-  tbody.innerHTML = snap.docs.map((d,i) => {
+  // Sort newest first, cap at 200, client-side
+  const sorted = snap.docs
+    .sort((a, b) => (b.data().timestamp?.toMillis?.() || 0) - (a.data().timestamp?.toMillis?.() || 0))
+    .slice(0, 200);
+  tbody.innerHTML = sorted.map((d,i) => {
     const t = d.data();
     const typeBadge = t.type === 'bilateral'
       ? '<span style="color:var(--gold);font-size:10px">BILATERAL</span>'
